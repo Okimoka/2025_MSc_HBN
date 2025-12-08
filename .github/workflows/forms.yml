@@ -1,0 +1,21 @@
+on:
+    workflow_dispatch:
+    push:
+     paths:
+       - project*.toml
+       - .github/workflows/forms.yml
+jobs:
+    build-deploy:
+        runs-on: ubuntu-24.04
+        strategy:
+            matrix:
+                language: 
+                    - de
+                    - en
+        steps:
+            - name: Generate Forms
+              uses: s-ccs/consentform_gh_action@main
+              with:
+                language: ${{ matrix.language }}
+   
+   

@@ -1,0 +1,72 @@
+
+
+PHASE 1 (dataset creation):
+
+sync_eye(link).py
+-----------
+- ((Implement more sophisticated "spike region" detection as described in the code))
+	- Why this was chosen has to be explained in thesis, with demonstrative examples
+- maybe change pyramid to proper pointy normal distr. or similar (then cutoff points on left+right might seen arbitrary)
+- rename extra columns to the proper names (e.g. sacc amplitude etc. ) - use table headers from events file
+	- check whether "Table Header for Fixations/Saccades/...:" differ across subjects/releases?
+- Double-check that the 71 subjects that only have _Events are properly handled. Also check if some subjects are missing _Events but have _Samples. If not, always prefer _Events
+- When implemented, integrate mne bad channel detection to fallback to different electrodes when default electrodes are bad
+- MATLAB EYE-EEG tracked these metrics: median_fix_pos_left_x	median_fix_pos_left_y	median_fix_pos_right_x	median_fix_pos_right_y	median_fix_pos_avgLR_x	median_fix_pos_avgLR_y. maybe implement too?
+- EYE-EEG also marks eeg regions where ET was out of calibration range. in the tutorial they stress how important this is (?), implement as annotations
+
+Omitted (maybe explain in thesis why):
+- Kullback Leibler divergence metric
+- kolgorov smirnoff test with normal distribution
+- custom saccade/fixation detection algorithm to compare with idt used in hbn
+
+
+Before re-running pipeline:
+- make sure it properly logs tsv/idf i.e. nonexistence of useful et files, rather than just skipping (et_data_format currently always txt)
+	- every single subject should be listed on the overview, and whether it has eventsfile, samplesfile
+	- Cross check with participants.tsv that at least all available subjects are listed
+	- Check that subjects like NDARAB683CYD are there
+
+score_subjects.py
+-----------
+- current quality metrics are not great. for each implemented quality check there should be undeniable reason for it to exist (!!!)
+	- giving subjects better scores for higher snr / more shared events might be ok, but have some kind of visualization/statistic that shows why exactly
+
+
+_config_utils.py
+-----------
+- made some changes on the cluster so it is more performant - is this really necessary? if yes, implement in a cleaner way
+
+
+create_overview_from_derivs.py:
+-------------------------------
+- Finish legend descriptions for metrics, remove some useless ones 
+	- Actually combine this with sync_eye, so we don't have huge pre-init object in there. Defaults could also be shown in the legend as a column in excel
+
+
+Misc
+-----------
+- run "npx bids-validator ." on mergedDataset.
+- double check that there are no unexpected files inside "Behavioral" folders from nitrc download
+- properly setup github/julia (DrWatson, Manifest etc.). Note newest mne is needed also inside julia packages
+- some subjects (e.g. NDARWU079DJZ from R11) have EEG only as .mat and .csv. Check how many - if it's worth, implement conversion to .set
+
+
+PHASE 2 (Analysis):
+-----------
+- just work on uf.jl and clean it up
+	- first get regular frps to look good consistently
+
+
+
+
+
+-------------------------------------------------------------------
+notes
+- Why are some subjects in tsv? Can they still be salvaged somehow? (ask HBN-EEG corresponding author)
+- when task_is_rest is set, config also needs rest_epochs_duration or else it crashes. what do i do? (ask jevri again)
+- eeglab 3d electrode viewer is in (edit > channel locations > plot 3d)
+
+- quickly mention why exactly specific heog+veog electrodes were chosen (langer paper has list of eog electrodes, and chosen ones were the ones on outer canthuses)
+- include picture of typical eye movement for symbolsearch (gradient colored line with dots at samples) 
+- ((Some subjects have super long blinks, but analysis of signals doesnt show this - maybe just mention that eye even detection is inherently inconsistent))
+
