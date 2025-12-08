@@ -45,6 +45,7 @@ create_overview_from_derivs.py:
 
 Misc
 -----------
+- look at more eeg recordings, e.g. pre and post filtering (!!!) any glaring errors? why don't naive frps look ok?
 - run "npx bids-validator ." on mergedDataset.
 - double check that there are no unexpected files inside "Behavioral" folders from nitrc download
 - properly setup github/julia (DrWatson, Manifest etc.). Note newest mne is needed also inside julia packages
