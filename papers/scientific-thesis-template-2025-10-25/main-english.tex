@@ -9,6 +9,7 @@
 % The following package allows \\ at the title page
 % For more information see https://github.com/latextemplates/scientific-thesis-cover/issues/4
 \RequirePackage{kvoptions-patch}
+
 \documentclass[
   % fontsize=11pt is the standard
   numbers=noenddot,
@@ -36,7 +37,18 @@
 %   - https://tex.stackexchange.com/a/47451/9075
 %   - https://tex.stackexchange.com/a/166791/9075
 \usepackage{upquote}
+% In preamble:
+\newif\ifdraft
+\drafttrue        % comment out for “final”
+% \draftfalse
 
+\ifdraft
+  \newcommand{\mynote}[1]{\textcolor{red}{[#1]}}
+\else
+  \newcommand{\mynote}[1]{}
+\fi
+
+\usepackage{xcolor}
 % Set English as language and allow to write hyphenated"=words
 %
 % Even though `american`, `english` and `USenglish` are synonyms for babel package (according to https://tex.stackexchange.com/questions/12775/babel-english-american-usenglish), the llncs document class is prepared to avoid the overriding of certain names (such as "Abstract." -> "Abstract" or "Fig." -> "Figure") when using `english`, but not when using the other 2.
@@ -394,24 +406,32 @@
 
 % Extended enumerate, such as \begin{compactenum}
 \usepackage{paralist}
+
 \usepackage[
-  backend       = biber, %biber does not work with 64x versions alternative: bibtex8; minalphanames only works with biber backend
-  sortcites     = true,
-  bibstyle      = alphabetic,
-  citestyle     = alphabetic,
-  giveninits    = true,
-  useprefix     = false, %"von, van, etc." will be printed, too. See below.
-  minnames      = 1,
-  minalphanames = 3,
-  maxalphanames = 4,
-  maxbibnames   = 99,
-  maxcitenames  = 2,
-  natbib        = true,
-  eprint        = true,
-  url           = true,
-  doi           = true, %source: http://tex.stackexchange.com/a/23118/9075
-  isbn          = true, %source: http://tex.stackexchange.com/a/23118/9075
-  backref       = true]{biblatex}
+  backend=biber,
+  style=numeric-comp,
+  sorting=none,
+  autocite=superscript
+]{biblatex}
+
+%\usepackage[
+%  backend       = biber, %biber does not work with 64x versions alternative: bibtex8; %minalphanames only works with biber backend
+%  sortcites     = true,
+%  bibstyle      = alphabetic
+%  citestyle     = alphabetic,
+%  giveninits    = true,
+%  useprefix     = false, %"von, van, etc." will be printed, too. See below.
+%  minnames      = 1,
+%  minalphanames = 3,
+%  maxalphanames = 4,
+%  maxbibnames   = 99,
+%  maxcitenames  = 2,
+%  natbib        = true,
+%  eprint        = true,
+%  url           = true,
+%  doi           = true, %source: http://tex.stackexchange.com/a/23118/9075
+%  isbn          = true, %source: http://tex.stackexchange.com/a/23118/9075
+%  backref       = true]{biblatex}
 
 % enable more breaks at URLs. See https://tex.stackexchange.com/a/134281.
 \setcounter{biburllcpenalty}{7000}
@@ -866,56 +886,10 @@
 % abstract
 % Same style as table of contents
 \section*{Abstract}
-\emph{Write an abstract for your work.
-  Replace each of the points below with one sentence (two if you must) and you have your abstract.
-  Write it when you finished your entire report.
-  \footnote{https://www.easterbrook.ca/steve/2010/01/how-to-write-a-scientific-abstract-in-six-easy-steps/}}
+\emph{sample abstract
+  \footnote{sample footnote}}
 
 \emph{Introduction.}
-In one sentence, what’s the topic?
-Phrase it in a way that your reader will understand.
-If you’re writing a PhD thesis, your readers are the examiners – assume they are familiar with the general field of research, so you need to tell them specifically what topic your thesis addresses.
-Same advice works for scientific papers – the readers are the peer reviewers, and eventually others in your field interested in your research, so again they know the background work, but want to know specifically what topic your paper covers.
-
-\emph{State the problem you tackle.}
-What’s the key research question?
-Again, in one sentence.
-(Note: For a more general essay, I’d adjust this slightly to state the central question that you want to address)
-Remember, your first sentence introduced the overall topic, so now you can build on that, and focus on one key question within that topic.
-If you can’t summarize your thesis/paper/essay in one key question, then you don’t yet understand what you’re trying to write about.
-Keep working at this step until you have a single, concise (and understandable) question.
-
-\emph{Summarize (in one sentence) why nobody else has adequately answered the research question yet.}
-For a PhD thesis, you’ll have an entire chapter, covering what’s been done previously in the literature.
-Here you have to boil that down to one sentence.
-But remember, the trick is not to try and cover all the various ways in which people have tried and failed; the trick is to explain that there’s this one particular approach that nobody else tried yet (hint: it’s the thing that your research does).
-But here you’re phrasing it in such a way that it’s clear it’s a gap in the literature.
-So use a phrase such as “previous work has failed to address…”.
-(if you’re writing a more general essay, you still need to summarize the source material you’re drawing on, so you can pull the same trick – explain in a few words what the general message in the source material is, but expressed in terms of what’s missing)
-
-\emph{Explain, in one sentence, how you tackled the research question.}
-What’s your big new idea?
-(Again for a more general essay, you might want to adapt this slightly: what’s the new perspective you have adopted? or:
-What’s your overall view on the question you introduced in step 2?)
-
-\emph{In one sentence, how did you go about doing the research that follows from your big idea.}
-Did you run experiments?
-Build a piece of software?
-Carry out case studies?
-This is likely to be the longest sentence, especially if it’s a PhD thesis – after all you’re probably covering several years worth of research.
-But don’t overdo it – we’re still looking for a sentence that you could read aloud without having to stop for breath.
-Remember, the word ‘abstract’ means a summary of the main ideas with most of the detail left out.
-So feel free to omit detail!
-(For those of you who got this far and are still insisting on writing an essay rather than signing up for a PhD, this sentence is really an elaboration of sentence 4 – explore the consequences of your new perspective).
-
-\emph{As a single sentence, what’s the key impact of your research?
-  Here we’re not looking for the outcome of an experiment.
-}
-We’re looking for a summary of the implications.
-What’s it all mean?
-Why should other people care?
-What can they do with your research.
-(Essay folks: all the same questions apply: what conclusions did you draw, and why would anyone care about them?)
 
 
 \microtypesetup{protrusion=false}
@@ -947,7 +921,7 @@ What can they do with your research.
 %\listofalgorithms %Ist nur für Algorithmen, die mittels \begin{algorithm} umschlossen werden, nötig
 
 % Abbreviations / Acronyms
-\printglossary[type=\acronymtype,title={Abbreviations}]
+%\printglossary[type=\acronymtype,title={Abbreviations}]
 % \printglossaries
 % \printnoidxglossaries
 % \printunsrtglossaries cannot be used, because then no indexing happens; source: https://tex.stackexchange.com/a/287128/9075
@@ -962,903 +936,241 @@ What can they do with your research.
 \chapter{Introduction}\label{sec:introduction}
 %%% ===============================================================================
 
-\emph{Purpose and scope of your entire report}.
-The purpose of your entire report is to make a \emph{scientific argument using the scientific method}.
-A scientific argument always has the following steps that all must come in this order.
-%
+\ldots \mynote{proper intro}
+
+\section{Datasets}\label{ssec:datasets}
+\ldots \ldots \mynote{proper explaination of what the purposes and differences of the HBN and HBN-EEG datasets are}
+\subsection{Paradigms}\label{sssec:paradigms}
+%%% itemize
 \begin{itemize}
-  \item[SM1] \emph{Explicate the assumptions and state of the art} on which you are going to conduct your research to investigate your research problem/test the hypothesis.
-  \item[SM2] Clearly and precisely \emph{formulate a research problem or hypothesis}.
-  \item[SM3] \emph{Describe the (research) method} that you followed to investigate the problem / to test the hypothesis in a way that \emph{allows someone else to reproduce your steps}.
-        The method must includes steps and criteria for evaluating whether you answered your question successfully or not.
-  \item[SM4] \emph{Provide execution details} on how you followed the method in the given, specific situation.
-  \item[SM5] \emph{Report your results} by describing and summarizing your measurements.
-        You must not interpret your results.
-  \item[SM6] \emph{Now interpret your results} by contextualizing the measurements and drawing conclusion that lead to answering your research problem or defining further follow-up research problems.
+  \item \ldots
+  \item \textbf{Symbol Search:} \mynote{quick explanation of symbol search paradigm. it can be seen how the subject moves their gaze horizontally line by line. the image captures only the first page, after pressing a button, this gaze pattern repeats (starting at the top left). i wanted to include this image because i think it nicely visualizes the et data that will be analyzed (very horizontal-heavy eye movement, shows types of saccades that are performed, new stimulus onset + large saccade with every new page)}
 \end{itemize}
-%
-This template will mark various parts of the structure with SM1-SM6 to recall to you which step of a scientific argument is used and where.
-
-\emph{Purpose and scope of \cref{sec:introduction}}.
-The introduction chapter is a summary of your work and your scientific argument that shall be understandable to anyone in your scientific field, e.g., anyone in Data Science.
-A reader must be able to comprehend the problem, method, relevant execution details, results, and their interpretation by reading the introduction and the introduction alone.
-Section~\ref{sec:introduction:topic} introduces the general topic of your research.
-Section~\ref{sec:introduction:state-of-art} discusses the state of the art and identifies a research.
-Section~\ref{sec:introduction:research-question} then states the research problem to investigate.
-Section~\ref{sec:problem-exposition:research-method} explains the research method that was followed, possibly with execution details.
-Section~\ref{sec:introduction:results} then presents the results and their interpretation.
-Only if a reader thinks they are not convinced or they need more details to reproduce your study, they shall have to read further.
-The individual chapters and sections provide the details for each of the steps in your scientific argument.
-
-You usually write the introduction chapter \emph{after} you wrote all other chapters, but you should keep on making notes for each of the sections as you write the later chapters.
-.
-
-\emph{Purpose and scope of the introduction paragraph to a chapter}.
-The paragraph you are reading above is a typical introductory paragraph to a chapter.
-It is a high-level summary of the chapters' topic (SM1 and SM2).
-It gives the reader some guidance by breaking down the chapter topic into subtopics that are clearly named (SM3) in the right order with forward references to the corresponding sections (SM4).
-It may close with announcing the result you obtain (SM6) but this is usually not done in the opening paragraph of the introduction.
-
-% ---------------------------------------------------------------------------------
-\section{Context and Topic (SM1)}\label{sec:introduction:topic}
-% ---------------------------------------------------------------------------------
-
-\emph{Purpose and scope}.
-You begin with providing the general scientific audience an introduction into the specific topic of your work.
-The aim of this section is to first introduce the \emph{general subject of study} (``Giraffes are well-known animals and everyone's favorite''), the \emph{specific topic of societal or scientific interest} to investigate (``Giraffes have blue tongues'') and the \emph{objective of society/science towards} this topic (``it is unknown at the moment how the blue color tone evolved'').
-It must be understandable by the general scientific public.
-Every \emph{term} with a specific meaning must be highlighted and introduced in precise language/concepts that only builds on a general scientific background.
-
-At the end of this section, you have explained and established a general goal that society/science universally agrees to be worth achieving (``knowing how everyone's favorite animal evolved the colour of their tongue'').
-
-% ---------------------------------------------------------------------------------
-\section{State of the Art (SM1)}\label{sec:introduction:state-of-art}
-% ---------------------------------------------------------------------------------
-
-\emph{Purpose and scope}.
-You provide a more in-depth introduction into the research topic by contrasting the current state of the art in society/science in relation to the research topic you introduced in \cref{sec:introduction:topic}.
-This introduction has to
-
-\begin{itemize}
-  \item present established facts, methods, and results that provide a deeper understanding of the research topic (``prior work on giraffe genomes, relevance of giraffes for societal well-being, giraffes being a model-animal for various other studies, etc.'')
-  \item discuss in which ways prior and recent ideas still fall short of reaching the general goal you explained in \cref{sec:introduction:topic} (``prior work only sequenced the genome of one giraffe and did not consider genes of ancient ancestors'')
-\end{itemize}
-
-You have to provide citations/literature references for each of the statements and claims you are making.
-This section is usually a summary of the related work discussion in \cref{sec:background}.
-
-At the end of this section, you have established a \emph{knowledge gap} between the state of the art and the general objective you developed in \cref{sec:introduction:topic}.
-\emph{Stating a (knowledge) gap between a status quo and a desired situation is the \emph{first step} of a writing scientific argument.}
-
-
-% ---------------------------------------------------------------------------------
-\section{Research Question (SM2)}\label{sec:introduction:research-question}
-% ---------------------------------------------------------------------------------
-
-\emph{Purpose and scope}.
-In this section you state in which way you will address the knowledge gap you identified at the end of \cref{sec:introduction:state-of-art}.
-You usually cannot address and resolve the entire knowledge gap in your work.
-The purpose of this section is to clearly detail the specific part of the knowledge that you will address.
-You thereby make all the assumptions explicit that underlie your work (``in this report we focus on genomes of female giraffes who lived in the years 1950-2000 in South Africa'').
-
-Your general research question states
-\begin{itemize}
-  \item The starting point/assumptions you are making from which your research starts (``for the given 13 genomes of female giraffes...''), and
-  \item the final objective/solution you want to reach (``...identify the genes involved in color expression of giraffe tongues...'')
-  \item and the evaluation criteria that will determine whether you are successful (``...that are present in at least 75\% of the studied giraffes'')
-\end{itemize}
-
-You will usually break your general research question down into sub-research questions.
-You may do this here.
-The sub-research questions have to form a chain that take you in smaller steps from the starting point/assumptions of your general research question to your final objective and evaluation.
-
-% ---------------------------------------------------------------------------------
-\section{Method or Approach (SM3, SM4)}\label{sec:introduction:method}
-% ---------------------------------------------------------------------------------
-
-\emph{Purpose and scope}.
-In this section you outline the method that you applied to answer the research questions, or the new technical approach that you developed to answer it.
-It is a summary of the steps that someone else has to take in order to reproduce your steps.
-Mention here the data sets you had to obtain/gather/analyze, interviews with stakeholders you had to make to further develop the research questions, technical artifacts (programs, algorithms, models) you could apply or that you had to develop (and how they work).
-
-The section is most readable if you give each of the steps in your method its own paragraph.
-In each paragraph you first briefly explain the concept of the step in your method (SM3, ``we explored the data through visual analytics'') and then provide details in execution (SM4, ``we used tool X, we developed dashboard Y'') include a forward reference to the respective chapter that provides more details.
-
-% ---------------------------------------------------------------------------------
-\section{Findings (SM5, SM6)}\label{sec:introduction:results}
-% ---------------------------------------------------------------------------------
-
-\emph{Purpose and scope}.
-You close the introduction by clearly stating the evaluation setup you designed to evaluate the success of your study regarding the research objective, which comes in two steps.
-It is most likely a summary of your evaluation in \cref{sec:evaluation}.
-
-\section*{Results (SM5)}
-
-You state the evaluation method that is in line with your research question from \cref{sec:introduction:research-question} and summarize the measurements you obtained but you do not interpret them, i.e., you only report the numbers but you do not include judging statements.
-
-\section*{Interpretation (SM6)}
-
-You summarize your interpretation of the results and draw conclusions.
-State whether and to which degree the research question from \cref{sec:introduction:research-question} has been answered successfully or not.
-
-Finally state briefly how much closer society and science have come in answering the general objective you outlined in \cref{sec:introduction:topic}.
-
-%%% ===============================================================================
-\section{Background (SM1)}\label{sec:background}
-%%% ===============================================================================
-
-\emph{Purpose and scope}.
-The background chapter has multiple roles.
-\begin{itemize}
-
-  \item \emph{Preliminaries.}
-        It has to provide all (and exactly the) information that is necessary to understand the methodological and technical parts of your work in the specific area of study.
-        Assume as starting point another student in your degree who did not study the specific subject you are studying but has the task to understand your work.
-        Which concepts, terms, definitions, etc. does the student have to know?
-        Which formulas, symbols, etc. are standard in this topic?
-        Only introduce definitions if you actually need them in any of the subsequent chapters.
-
-  \item \emph{Related Work.}
-        It has to provide a comprehensive discussion of all prior work in the area on this subject.
-        Your discussion has to summarize these prior works and has to explain in which way the research question you are solving (\cref{sec:introduction:research-question}) has not bee solved yet because prior work had more limiting assumptions, addressed a different angle, their results are not complete etc. Depending on the subject you are studying, the related work part can be larger and warrant an entire chapter on its own, or be fully concluded within \cref{sec:introduction:state-of-art}.
-
-        You can close the related work discussion by clarifying the positioning and formulation of your research question (SM2) in relation to all the prior work, making more explicit whether you address an existing research question under different premises or whether you work on a modified or completely new research question.
-\end{itemize}
-
-%%% ===============================================================================
-\section{Problem Exposition (optional)}\label{sec:problem-exposition}
-%%% ===============================================================================
-
-\emph{Purpose and scope}.
-Introduce the problem context in more detail if \cref{sec:introduction:topic} does not provide all necessary information about the problem to follow the rest of the report.
-This can include further details on the data you studied, context assumptions and requirements, etc.
-
-If you have to expose the problem in more detail here, then this chapter should also provide a more detailed explanation of research question and the method you are applying, i.e., you can now provide more concrete sub-problems compared to \cref{sec:introduction:research-question} more details for the method \cref{sec:introduction:method} because you now have explained the problem much better.
-A typical structure can be.
-
-% ---------------------------------------------------------------------------------
-\section{Context/Business Understanding (SM1)}\label{sec:problem-exposition:context-understanding}
-% ---------------------------------------------------------------------------------
-
-provide details
-
-% ---------------------------------------------------------------------------------
-\section{Data Understanding (SM1)}\label{sec:problem-exposition:data-understanding}
-% ---------------------------------------------------------------------------------
-
-provide details
-
-% ---------------------------------------------------------------------------------
-\section{Detailed Research Questions (SM2)}\label{sec:problem-exposition:research-problems}
-% ---------------------------------------------------------------------------------
-
-provide details based on \cref{sec:problem-exposition:context-understanding} and \ref{sec:problem-exposition:data-understanding}
-
-% ---------------------------------------------------------------------------------
-\section{Detailed Method (SM3)}\label{sec:problem-exposition:research-method}
-% ---------------------------------------------------------------------------------
-
-provide details based on \cref{sec:problem-exposition:context-understanding} and \ref{sec:problem-exposition:data-understanding}
-
-%%% ===============================================================================
-\section{First Real Chapter addressing first Research Problem}\label{sec:problem1}
-%%% ===============================================================================
-
-\emph{Purpose and scope}.
-After you stated research context (SM1), research problem (SM2), and research method (SM3) in \cref{sec:introduction} and possibly \cref{sec:problem-exposition}, the remainder of your entire report addresses execution (SM4), results (SM5), and interpretation (SM6).
-You usually do this by addressing various sub-problems again through scientific arguments following the 6 steps SM1-SM6.
-
-Have a short chapter introduction that recalls and explains the first research problem of your thesis.
-The problem has to show up in the introduction in \cref{sec:introduction:research-question} or in \cref{sec:problem-exposition:research-problems} already.
-This provides the background (SM1) for this chapter while the first research problem of the thesis becomes the research question/hypothesis (SM2) for this chapter.
-
-Next, explain in the chapter intro how you solve the research problem in this chapter by breaking it down in further sub-problems.
-By this, you outline the method (SM3) through which you are going to solve the problem of this chapter.
-This is necessary to give the reader guidance of what's to come in this chapter and how it fits into the thesis as a whole.
-Explain that you will address the first sub-problem in \cref{sec:problem1:subproblem1} and the second sub-problem in \cref{sec:problem1:subproblem2}, etc. The sections then provide the details for execution and results.
-
-% ---------------------------------------------------------------------------------
-\section{First Sub-Problem}\label{sec:problem1:subproblem1}
-% ---------------------------------------------------------------------------------
-
-\emph{The first paragraph describes the first sub-problem and develops the requirements a solution has to satisfy (SM2 for this section).}
-The requirements have to be based on the knowledge and reasoning developing in the preceding chapters and sections.
-Try to use an example to illustrate the problem and the desired properties of the solution.
-Check that every term/concept you use here has already been defined already in a previous section.
-If you cannot describe your problem without defining new terms, you may have to add another section before this one that develops the terms and concepts you need to explain the problem.
-
-\emph{The second paragraph describes the method/approach how you address the problem (SM3 for this section).}
-Describe the method in a level of detail that allows another student to reproduce your steps.
-Make use of appendices % (see \cref{sec:appendix1})
-if certain details take too much space.
-
-\emph{The third, fourth, and following paragraph provides details on applying the method or developing a new approach, i.e., execution (SM4) and may explain results (SM5)}, i.e. details on the steps needed to reproduce the results.
-
-Results (SM5) can come in many forms, e.g., conceptual diagrams, algorithms, tables, charts, a list of articles from a literature research etc. You must reference them (``\cref{fig:my_label} shows.
-..'') and describe the results in text.
-If you use diagrams, tables, or charts, you cannot expect the reader to know what to you expect them to see in a diagram, table or chart.
-Describe to them how to read these, explain the meaning of particular elements, point out special observations.
-But you may only describe the results you must not interpret them.
-Make use of appendices if certain details take too much space.
-
-\begin{figure}
+\begin{figure}[htb]
   \centering
-  %%%\includegraphics{/path/to/figure.pdf}
-  \caption{A scientific figure that has to be explained in the text}
-  \label{fig:my_label}
+  \includegraphics[width=0.5\textwidth]{gaze_history.png}
+  \caption{Gaze history visualization \mynote{Clean up this image and maybe find a better subject}}
+  \label{fig:gaze_history}
 \end{figure}
 
-\emph{After describing the results, you may interpret them (SM6).}
-Here you can infer what a particular observation means (for you), how it can be applied, or what others can do with it.
-You must not write interpretations before completely describing your results.
-This is a common mistake done by most beginner writers.
-You want to quickly get to the point, which is the final finding or interpretation.
-But you forget that your reader does not understand yet what you are interpreting - they do not know yet what you do know.
-An interpretation can only be followed after all results have been described.
-The interpretation must be based on the written description only.
-Then you can be sure that your readers can follow your interpretation and reach the same conclusions as you have.
 
-Ideally, your interpretation leads to the next sub-problem in \cref{sec:problem1:subproblem2}.
+\chapter{Related Work}\label{sec:relatedwork}
 
-% ---------------------------------------------------------------------------------
-\section{Second Sub-Problem}\label{sec:problem1:subproblem2}
-% ---------------------------------------------------------------------------------
+\ldots
 
-You now build on the solution to the first sub-problem of \cref{sec:problem1:subproblem1} (SM1) and recall second sub-problem (SM2, you detailed in the introduction of this chapter) and follow the same pattern as before (SM3-SM6).
+\chapter{Data and Methods}\label{sec:datanmethods}
 
-Note that not all sections may not include all parts SM1-SM6 in all detail.
-Some sections do not require to repeatedly state the background (SM1) or the research problem (SM2) if they were already clearly defined in a previous section.
-Sometimes, a section is only dedicated to describing the method (SM3) and execution (SM4) and does not contain any results or interpretations.
-Sometimes results (SM5) and interpretations (SM6) only come in the evaluation chapter.
+\section{Data acquisition and sources}
 
-What is important for you when you are writing a scientific argument is not to slavishly have SM1-SM6 in each section explicitly, but that you are always fully aware of the following:
-%
+\mynote{The part on datasets in the Introduction covers the datasets on a basic level, here some more in-depth technical description is needed to aid in understanding the next sections. this also needs more detail}
+
+\subsubsection{HBN-EEG dataset}
+The dataset was retrieved from NeMAR \cite{nemar-hbn-eeg} and consists of 11 \texttt{.zip} archives totalling 1.7 TiB, each containing curated EEG data in BIDS format.
+
+\subsubsection{HBN dataset}
+The original HBN dataset is hosted on the public fcp-indi S3 bucket \cite{bucket}. The folder \texttt{data/Archives/HBN/EEG/} contains 4576 \texttt{.tar.gz} subject archives totalling 5.6 TiB. Each subject archive holds at most 3 Folders, \texttt{Behavioral}, \texttt{EEG} and \texttt{Eyetracking} \mynote{double check logs whether subjects exist where not all 3 are present}.
 \begin{itemize}
-  \item Which step of a scientific argument am I currently writing (SM1, SM2, ..., SM6)?
-  \item Does the step that I am writing come in the right order, i.e., if you are writing about execution (SM4, e.g., details of building a model), is there a preceding paragraph or section that describes the method (SM3) and is that one preceded by a clear statement of the (sub-)problem addressed (SM2)?
-  \item Are you really \emph{not} writing interpretation SM6 before SM5, SM4, or SM3?
-  \item Is it clear to the reader which part of the scientific argument you are currently making?
+  \item \textbf{Behavioral:} Contains phenotypic data about the subject in at most two different formats, \texttt{.csv} and \texttt{.mat}.
+  \item \textbf{EEG:} Contains preprocessed \footnote{The exact preprocessing steps that were applied are unknown and the preprocessed data is not meant to be used \url{https://www.nitrc.org/forum/forum.php?forum_id=10003&thread_id=15454} } and raw EEG data. Since the HBN-EEG dataset will be used over the original HBN dataset for EEG data, this folder is of no further interest.
+  \item \textbf{Eyetracking:} Contains at most 4 subfolders: \texttt{idf}, \texttt{txt}, \texttt{mat} and \texttt{tsv} \mynote{actually check whether subjects exist where all 4 are present}. Each folder represents the same eyetracking data in a different format. \mynote{go into a little more detail here, specifically that tsv ET does not contain necessary events to process it, that the idf folder is always empty, and that mat requires conversion to .txt}
 \end{itemize}
 
-%%% ===============================================================================
-\section{Second Real Chapter}\label{sec:sub-problem2}
-%%% ===============================================================================
+Based on the release documentation \cite{hbn-releases}, updates between releases mostly concern data availability and dataset curation (e.g., additions of participants, corrections to phenotypic tables or metadata). In particular, there are no changes that would require release-specific treatment of the EEG data. For this reason, EEG data from the full HBN-EEG collection were merged together to form a single integrated BIDS dataset. This enables a single, consistent preprocessing and analyis pipeline across all subjects. This merged dataset was then enriched with the associated eye-tracking and phenotypic data for each subject from the original HBN archives. The integration of this type of data is not yet standardized in BIDS, and this step will cause BIDS validators \cite{bids-validator} to consider the dataset as invalid. The tools used in this study (mne-bids-pipeline and Unfold.jl) remained compatible with this developmental format, simply ignoring the extra files that are not of relevance. The following sections cover how this merged dataset was created.
 
-Have a short chapter introduction that recalls what you already achieved in \cref{sec:problem1} and explain the second research problem of your thesis.
-The problem has to show up in the introduction in \cref{sec:introduction:research-question} or in \cref{sec:problem-exposition:research-problems} already.
-etc.
+\subsection{Download}
 
-%%% ===============================================================================
-\section{Evaluation}\label{sec:evaluation}
-%%% ===============================================================================
+Custom helper scripts were used to download and unpack all required source archives in a restartable manner. This was done to improve the reproducibility of the study compared to manual downloading.
+Downloads were performed with parallel workers and to ensure integrity of the files, incomplete transfers were written to a staging directory and only moved to the final location after the expected file size was reached. This approach was taken both for the retrieval from the fcp-indi S3 bucket and for the web download from NeMAR.
+After download, all archives were extracted using dedicated unpacking scripts making use of the same paradigms to avoid partial extractions and make use of parallelization.
 
-\emph{Purpose and scope}.
-The evaluation chapter should be the most formal and rigorously structured chapter of your thesis as the validity of your evaluation argument depends on it.
+\subsection{Merging}
 
-% ---------------------------------------------------------------------------------
-\section{Objective (SM2)}\label{sec:evaluation:objective}
-% ---------------------------------------------------------------------------------
+Finally, further scripts make use of the downloaded files to deterministically create the final merged BIDS dataset. For files that are required as-is in the new merged dataset, e.g. EEG and eye-tracking recordings, the script creates symlinks to the downloaded files and renames them to be BIDS conform. Other files like the \texttt{participants.tsv} or other metadata files for the merged dataset have to be generated by merging metadata files from the separate HBN-EEG releases (i.e. concatenating all \texttt{participants.tsv} or some summary tables together into one file). To support traceability, some files were also augmented with their source release numbers. For files that were contained in all releases with only minor differences irrelevant to the merged result, the file from the first release was chosen.
 
-Clearly state what you want to evaluate and what you want to measure.
+Because metadata conventions and file naming practices vary slightly across releases, some harmonization steps were applied during dataset construction. These include:
 
-% ---------------------------------------------------------------------------------
-\section{Setup (SM3)}\label{sec:evaluation:setup}
-% ---------------------------------------------------------------------------------
-
-State which data, participants, tools, etc. you chose and why.
-Clearly state how you measure outcomes and how you compare them to baselines, reference groups, etc.
-
-% ---------------------------------------------------------------------------------
-\section{Execution (SM4)}\label{sec:evaluation:execution}
-% ---------------------------------------------------------------------------------
-
-Provide all details on the execution that are necessary to allows another person to reproduce your results at a later point.
-
-% ---------------------------------------------------------------------------------
-\section{Results (SM5)}\label{sec:evaluation:results}
-% ---------------------------------------------------------------------------------
-
-You only report the measurements.
-You must present and reference them (``\cref{fig:my_label2} shows.
-..'') and describe the results in text.
-If you use diagrams, tables, or charts, you cannot expect the reader to know what to you expect them to see in a diagram, table or chart.
-Describe to them how to read these, explain the meaning of particular elements, point out special observations.
-But you may only describe the results you must not interpret them.
-Make use of appendices if certain details take too much space.
-
-\begin{figure}
-  \centering
-  %%%\includegraphics{/path/to/figure.pdf}
-  \caption{Another scientific figure that has to be explained in the text}
-  \label{fig:my_label2}
-\end{figure}
-
-% ---------------------------------------------------------------------------------
-\section{Discussion (SM6)}\label{sec:evaluation:discussion}
-% ---------------------------------------------------------------------------------
-
-An interpretation can only be followed after all results have been described.
-The interpretation must be based on the written description in \cref{sec:evaluation:results} only.
-Then you can be sure that your readers can follow your interpretation and reach the same conclusions as you have.
-
-
-\chapter{LaTeX Hints}
-\label{sec:latexhints}
-
-% Required for proper example rendering in the compiled PDF
-\newcount\LTGbeginlineexample
-\newcount\LTGendlineexample
-\newenvironment{ltgexample}%
-{\LTGbeginlineexample=\numexpr\inputlineno+1\relax}%
-{\LTGendlineexample=\numexpr\inputlineno-1\relax%
-  \tcbinputlisting{%
-    listing only,
-    listing file=\currfilepath,
-    colback=green!5!white,
-    colframe=green!25,
-    coltitle=black!90,
-    coltext=black!90,
-    left=8mm,
-    title=Corresponding \LaTeX{} code of \texttt{\currfilepath},
-    listing options={
-        frame=none,
-        language={[LaTeX]TeX},
-        escapeinside={},
-        firstline=\the\LTGbeginlineexample,
-        lastline=\the\LTGendlineexample,
-        firstnumber=\the\LTGbeginlineexample,
-        basewidth=.5em,
-        aboveskip=0mm,
-        belowskip=0mm,
-        numbers=left,
-        xleftmargin=0mm,
-        numberstyle=\tiny,
-        numbersep=8pt%
-      }
-  }
-}%
-
-This chapter contains hints on writing LaTeX.
-It focuses on minimal examples, which can be directly adapted to the content
-
-\section{Handling of paragraphs}
-
-\begin{ltgexample}
-One sentence per line.
-This rule is important for the usage of version control systems.
-A new line is generated with a blank line.
-As you would do in Word:
-New paragraphs are generated by pressing enter.
-In LaTeX, this does not lead to a new paragraph as LaTeX joins subsequent lines.
-In case you want a new paragraph, just press enter twice!
-This leads to an empty line.
-In word, there is the functionality to press shift and enter.
-This leads to a hard line break.
-The text starts at the beginning of a new line.
-In LaTeX, you can do that by using two backslashes (\textbackslash\textbackslash).
-\\
-This is rarely used.
-
-Please do \textit{not} use two backslashes for new paragraphs.
-For instance, this sentence belongs to the same paragraph, whereas the last one started a new one.
-A long motivation for that is provided at \url{http://loopspace.mathforge.org/HowDidIDoThat/TeX/VCS/#section.3}.
-\end{ltgexample}
-
-\section{Notes separated from the text}
-
-The package mindflow enables writing down notes and annotations in a way so that they are separated from the main text.
-
-\begin{ltgexample}
-\begin{mindflow}
-This is a small note.
-\end{mindflow}
-\end{ltgexample}
-
-\section{Handling TODOs}
-
-\begin{ltgexample}
-\textmarker{Markierter Text.}
-\end{ltgexample}
-
-Bei \verb1\textmarker1 wird nur die Textfarbe geändert, da dies auch bei einigen Worten gut funktioniert.
-
-\begin{ltgexample}
-\textcomment{Markierter Text.}{Kommentar dazu.}
-\end{ltgexample}
-
-\begin{ltgexample}
-\hl{In Gelb hervorgehoben.}
-Provided indirectly by pdfcomment.sty (soulpos).
-\end{ltgexample}
-
-\begin{ltgexample}
-\modified{Manuelle Markierung für Text, der seit der letzten Version geändert wurde.}
-\end{ltgexample}
-
-\begin{ltgexample}
-Das ist ein Text.
-\change{FL1: Text angepasst}{Geänderter Text}.
-\end{ltgexample}
-
-\begin{ltgexample}
-Hier nur ein Kommentar\sidecomment{Kommentar}.
-\end{ltgexample}
-
-\begin{ltgexample}
-\todo{Hier muss noch kräftig Text produziert werden}
-\end{ltgexample}
-
-\section{Hyphenation}
-
-\LaTeX{} automatically hyphenates words.
-When using \href{https://ctan.org/pkg/microtype}{microtype}, there should be fewer hyphenations than in other settings.
-It might be necessary to tweak the hyphenations nevertheless.
-Here are some hints:
-
-\begin{ltgexample}
-In case you write \enquote{application-specific}, then the word will only be hyphenated at the dash.
-You can also write \verb1applica\allowbreak{}tion-specific1 (result: applica\allowbreak{}tion-specific), but this is much more effort.
-
-You can now write words containing hyphens which are hyphenated at other places in the word.
-For instance, \verb1application"=specific1 gets application"=specific.
-This is enabled by an additional configuration of the babel package.
-\end{ltgexample}
-
-\section{Typesetting Units}
-
-\begin{ltgexample}
-Numbers can be written plain text (such as 100), by using the \href{https://ctan.org/pkg/siunitx}{siunitx} package as follows:
-\SI{100}{\km\per\hour},
-or by using plain \LaTeX{} (and math mode):
-$100 \frac{\mathit{km}}{h}$.
-\end{ltgexample}
-
-\begin{ltgexample}
-\SI{5}{\percent} of \SI{10}{kg}
-\end{ltgexample}
-
-\begin{ltgexample}
-Numbers are automatically grouped: \num{123456}.
-\end{ltgexample}
-
-\section{Surrounding Text by Quotes}
-
-\begin{ltgexample}
-Please use the \enquote{enquote command} to quote something.
-Quoting with "`quote"' or ``quote'' also works.
-
-\end{ltgexample}
-
-\section{Cleveref examples}
-\label{sec:ex:cref}
-
-Cleveref demonstration: Cref at beginning of sentence, cref in all other cases.
-
-\begin{figure}
-  \centering
-  \includegraphics[width=.75\linewidth]{example-image-a}
-  \caption{Example figure for cref demo}
-  \label{fig:ex:cref}
-\end{figure}
-
-\begin{table}
-  \centering
-  \begin{tabular}{ll}
-    \toprule
-    Heading1 & Heading2 \\
-    \midrule
-    One      & Two      \\
-    Thee     & Four     \\
-    \bottomrule
-  \end{tabular}
-  \caption{Example table for cref demo}
-  \label{tab:ex:cref}
-\end{table}
-
-\begin{ltgexample}
-\Cref{fig:ex:cref} shows a simple fact, although \cref{fig:ex:cref} could also show something else.
-
-\Cref{tab:ex:cref} shows a simple fact, although \cref{tab:ex:cref} could also show something else.
-
-\Cref{sec:ex:cref} shows a simple fact, although \cref{sec:ex:cref} could also show something else.
-\end{ltgexample}
-
-\section{Figures}
-
-\begin{ltgexample}
-\Cref{fig:label} shows something interesting.
-
-\begin{figure}
-  \centering
-  \includegraphics[width=.8\linewidth]{example-image-golden}
-  \caption[Simple Figure]{
-    Simple Figure.
-    Based on \citet{mwe}.
-  }
-  \label{fig:label}
-\end{figure}
-\end{ltgexample}
-
-\section{Sub Figures}
-
-An example of two sub figures is shown in \cref{fig:two_sub_figures}.
-
-\begin{ltgexample}
-\begin{figure}[!b]
-  \centering
-  \subfloat[Case I]{\includegraphics[width=.4\linewidth]{example-image-a}%
-    \label{fig:first_case}}
-  \hfil
-  \subfloat[Case II]{\includegraphics[width=.4\linewidth]{example-image-b}%
-    \label{fig:second_case}}
-  \caption{Example figure with two sub figures.}
-  \label{fig:two_sub_figures}
-\end{figure}
-\end{ltgexample}
-
-\section{Tables}
-
-\begin{ltgexample}
-\begin{table}
-  \caption{Simple Table}
-  \label{tab:simple}
-  \centering
-  \begin{tabular}{ll}
-    \toprule
-    Heading1 & Heading2 \\
-    \midrule
-    One      & Two      \\
-    Thee     & Four     \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-\end{ltgexample}
-
-\begin{ltgexample}
-% Source: https://tex.stackexchange.com/a/468994/9075
-\begin{table}
-  \caption{Table with diagonal line}
-  \label{tab:diag}
-  \begin{center}
-    \begin{tabular}{|l|c|c|}
-      \hline
-      \diagbox[width=10em]{Diag \\Column Head I}{Diag Column\\Head II} & Second & Third \\
-      \hline
-       & foo & bar              \\
-      \hline
-    \end{tabular}
-  \end{center}
-\end{table}
-\end{ltgexample}
-
-
-\section{Source Code}
-
-\begin{ltgexample}
-\Cref{lst:XML} shows source code written in XML.
-\Cref{line:comment} contains a comment.
-
-\begin{lstlisting}[
-  language=XML,
-  caption={Example XML Listing},
-  label={lst:XML}]
-<listing name="example">
-  <!-- comment --> (* \label{line:comment} *)
-  <content>not interesting</content>
-</listing>
-\end{lstlisting}
-\end{ltgexample}
-
-One can also add \verb+float+ as parameter to have the listing floating.
-\Cref{lst:flXML} shows the floating listing.
-
-\begin{ltgexample}
-\begin{lstlisting}[
-  % one can adjust spacing here if required
-  % aboveskip=2.5\baselineskip,
-  % belowskip=-.8\baselineskip,
-  float,
-  language=XML,
-  caption={Example XML listing -- placed as floating figure},
-  label={lst:flXML}]
-<listing name="example">
-  Floating
-</listing>
-\end{lstlisting}
-\end{ltgexample}
-
-One can also typeset JSON as shown in \cref{lst:json}.
-
-\begin{ltgexample}
-\begin{lstlisting}[
-  float,
-  language=json,
-  caption={Example JSON listing -- placed as floating figure},
-  label={lst:json}]
-{
-  key: "value"
-}
-\end{lstlisting}
-\end{ltgexample}
-
-Java is also possible as shown in \cref{lst:java}.
-
-\begin{ltgexample}
-\begin{lstlisting}[
-  caption={Example Java listing},
-  label=lst:java,
-  language=Java,
-  float]
-public class Hello {
-    public static void main (String[] args) {
-        System.out.println("Hello World!");
-    }
-}
-\end{lstlisting}
-\end{ltgexample}
-
-\section{Itemization}
-
-One can list items as follows:
-
-\begin{ltgexample}
-\begin{itemize}
-  \item Item One
-  \item Item Two
-\end{itemize}
-\end{ltgexample}
-
-With the package paralist, one can create itemizations with lesser spacing:
-
-\begin{ltgexample}
-\begin{compactitem}
-  \item Item One
-  \item Item Two
-\end{compactitem}
-\end{ltgexample}
-
-One can enumerate items as follows:
-
-\begin{ltgexample}
 \begin{enumerate}
-  \item Item One
-  \item Item Two
+  \item Standardization of BIDS file names (subject identifiers, task labels, run indices, and separators)
+  \item Completion and canonicalization of \texttt{$\ast$\_channels.tsv} contents by adding required columns and enforcing consistent channel types and units
+  \item Normalization of tabular files by harmonizing delimiters, column names, and column order
+  \item Targeted handling of a small number of subjects (< 20) with irregularities beyond these standard cases (e.g. by hardcoded renaming, conversion, or exclusion).
 \end{enumerate}
-\end{ltgexample}
 
-With the package paralist, one can create enumerations with lesser spacing:
+Throughout the merging process, the scripts validated expected directory structure and file contents, logging and/or terminating on any unexpected finds.
 
-\begin{ltgexample}
-\begin{compactenum}
-  \item Item One
-  \item Item Two
-\end{compactenum}
-\end{ltgexample}
+\subsection{Synchronization with eye-tracking data}
 
-With paralist, one can even have all items typeset after each other and have them clean in the TeX document:
+\mynote{reformulate and majorly elaborate on these paragraphs, depending on what will be written in the introduction}
+To synchronize EEG data with eye-tracking data, a fork of the mne-bids-pipeline was used, which is currently being developed for this exact purpose.
+It works by lining up shared events in the EEG and eye-tracking recording. The outputted \texttt{.fif} files contain eye-tracking samples and channels alongside the usual EEG data.
 
-\begin{ltgexample}
-\begin{inparaenum}
-  \item All these items...
-  \item ...appear in one line
-  \item This is enabled by the paralist package.
-\end{inparaenum}
-\end{ltgexample}
+Due to the number of shared events being the only grounds for synchronization accuracy, the movie watching paradigms in the dataset were unsuitable for this study, containing only 2 shared events per recording. This only left the symbol search paradigm \ref{sssec:paradigms} as a candidate to analyze \mynote{depending on how quality scoring turns out, some movie recordings will likely still be used if deemed to have good synchronization despite small shared event count}.
 
-\section{Abbreviations}
+\subsection{Parsing of eye-tracking data}
 
-With \verb+\gls{...}+ you can enter abbreviations, the first time you call it, the long form is used.
-When reusing \verb+\gls{..}+ the short form is automatically displayed.
-The abbreviation is also automatically inserted in the abbreviation list.
-With \verb+\glspl{...}+ the plural form is used.
-If you want the short form to appear directly at the first use, you can use \verb+\glsunset{..}+ to mark an abbreviation as already used.
-The opposite is achieved with \verb+\glsreset{..}+.
+Eye-tracking data in the HBN dataset were recorded using the iView-X Red-m by SensoMotoric Instruments \cite{hbn}. These recordings usually come in a proprietary \texttt{.idf} format, but were converted to \texttt{.txt} and \texttt{.tsv} for almost all subjects \mynote{give exact number. maybe mention that despite the converter being obsolete/abandonware, there seem to exist alternatives for conversion. however no .idf files remain in the dataset so this is irrelevant}.
 
-Abbreviations are defined in \verb+\content\ausarbeitung.tex+ by means of \verb+\newacronym{...}{...}{...}+.
+An eye-tracking recording has two files associated with it. 
 
-More information at: \url{https://ctan.org/pkg/bib2gls}.
+\begin{itemize}
+  \item Samples file (\texttt{sub-<id>\_task-symbolSearch\_et.txt}): \mynote{briefly describe structure of this file} \mynote{essentially, the file starts with some headers containing a few useful pieces of information, followed by a tsv (with slight quirks). this table lists all ET samples as well as all user events with their respective timestamps}
+  \item Events file (\texttt{sub-<id>\_task-symbolSearch\_et\_Events.txt}): \mynote{briefly describe structure of this file} \mynote{again, it's some headers followed by a quasi-tsv. this time the tsv contains all user events (these were confirmed to be fully identical to the user events in the samples file) and saccade, blink, and fixation events. these events include fixation duration, position, etc...}
+\end{itemize}
 
-\begin{ltgexample}
-At the first pass the \gls{fr} was 5.
-At the second pass was \gls{fr} 3.
-The plural form can be seen here: \glspl{er}.
-To demonstrate what the list of abbreviations looks like for longer description texts, \glspl{rdbms} must be mentioned here.
+Subjects may only have an Events file without Samples file \mynote{how many subjects have this property?} in which case an analysis is still possible to some degree, as detailed gaze positions are not required for all analyses performed in this study.
+Similarily, for subjects that have a Samples file without an Events file \mynote{how many subjects have this property?}, saccade and fixation information can be recreated from eye-tracking information \mynote{this is not currently done}.
+Only subjects with both files missing \mynote{how many subjects?} are skipped.
 
-\gls{dante} is a local \TeX\ user group.
-The German-speaking local \TeX\ user group is \gls{dante}.
-A \gls{gp} is a medical doctor.
-I went to my surgery to see the \gls{gp}.
-\end{ltgexample}
+The used mne-bids-pipeline fork exclusively supported eye-tracking files in eyelink format (\texttt{.asc}, \texttt{.edf}), and had to be extended with the functionality to parse converted \texttt{.idt} files. For later curation of select subjects, numerous metrics were additionally collected during the parsing and synchronization process \mynote{this step has to be done because manual curation is not feasible in a dataset of this size}. As this step is ultimately very specific to this study, a second variant of the modified mne-bids-pipeline was created that exclusively focused on adding support for \texttt{.idt} files.
 
-\todo{Include difference between acronym and abbreviation - \url{https://tex.stackexchange.com/a/154566/9075}}
+\mynote{quick summary of \texttt{read\_raw\_iview}. formulate this properly} \\
+\mynote{[if samples file is present]} \\
+\mynote{read sample rate from header} \\
+\mynote{locate start of tsv, special treatment for time and type cols} \\
+\mynote{remove channels that only have nan values} \\
+\mynote{count broken samples, i.e. sample has almost all gaze data == 0 (maybe omit as it's mentioned later in metrics)} \\
+\mynote{parse user events (type == \"MSG\") into mne Annotations} \\
+\mynote{estimate actual sampling frequency from times channel, as otherwise some annotations may fall outside of the raw time range} \\
+\mynote{add everything to Raw object} \\
+\\
+\mynote{if events file is present} \\
+\mynote{parse user events (type == \"UserEvent\") into mne Annotations} \\
+\mynote{parse Fixation, Blink, Saccade events into mne Annotations. Make use of \"extras\" attributes that can be added to Annotations since MNE-Python v1.10.0 to add the auxiliary info like fixation position, saccade speed, ...}
 
-\section{Other Features}
+\ldots \ldots \\
 
-\begin{ltgexample}
-The words \enquote{workflow} and \enquote{dwarflike} can be copied from the PDF and pasted to a text file.
-\end{ltgexample}
+\mynote{misc hurdles to maybe mention} \\
+\mynote{mne internal function \texttt{\_combine\_annotations} (concatenating a tuple of annotations) seems to not support \"extras\". when attempting, the resulting combined annotation object is missing all \"extras\" info. to fix this, the internal function was adjusted} \\
+\mynote{some ET \texttt{.txt} files contained special symbols that crashed mne when trying to name the channels, so they had to be renamed} \\
+\mynote{adjusted prefixing events with \texttt{ET\_}, which previously caused event messages to be tructuated. look at code for this again, it might have slightly modified functionality} \\
+\mynote{when texttt{first\_samp} differs between streams, shift back EEG annotations so they are synced. without this step, some annotations may again fall out of range}
+\mynote{added assert that at least 2 sync events are needed, as regression crashes otherwise}
+\\
 
-\begin{ltgexample}
-The symbol for powerset is now correct: $\powerset$ and not a Weierstrass p ($\wp$).
+\subsection{Capturing of synchronization quality metrics}
 
-$\powerset({1,2,3})$
-\end{ltgexample}
+Throughout the parsing and synchronization process, metrics are collected to assess the quality of the input EEG and Eye-tracking files, as well as the resulting synchronized file. These metrics include meta properties (sample counts, sampling rates, channel counts), basic checks (number of invalid samples, average saccade, fixation and blink properties) and previously built-in synchronization quality feedback (regression slope/intercept, residual timing error with counts within ±1 and ±4 EEG samples, cross-correlation between HEOG and screen gaze position).
+For a full list of metrics, see the table in the Appendix \mynote{todo}.
 
-\begin{ltgexample}
-Brackets work as designed:
-<test>
-One can also input backticks in verbatim text: \verb|`test`|.
-\end{ltgexample}
+Once finished, the script writes all metrics as a as \texttt{$\ast$\_metrics.json} into the derivatives folder next to the standard mne-bids-pipeline output. Additionally, an \texttt{$\ast$\_xcorr-artifact.npz} file stores part of the cross-correlation plot.
+A helper script combines all \texttt{.json} files to generate an overview over every recording as \texttt{.xlsx} \mynote{maybe update to store as .csv}
 
+\subsubsection{Cross correlation plot}
 
-\section{Varioref examples}
-\label{sec:ex:vref}
+The cross-correlation is computed between the horizontal EOG (HEOG) signal and the eye-tracker’s horizontal gaze position (``L POR X [px]'' and ``R POR X [px]'', averaged if both are present). If both streams are correctly time-aligned, EOG potential and gaze position movement should co-occur and produce a strong correlation at (or very near) zero lag.
 
-Varioref demonstration: Vref at beginning of sentence, vref in all other cases.
+\mynote{very unsure about this section. jevri said these plots should look like sharp normal distributions, not like pyramids}
 
-\begin{ltgexample}
-\Vref{fig:ex:cref} shows a simple fact, although \vref{fig:ex:cref} could also show something else.
+An exemplary cross correlation plot between gaze position and EOG can be found in the documentation of the EYE-EEG toolbox. As can be seen, the cross correlation peaks at zero lag with a parabola-like shape at the tip, and with symmetric linear lobes.
 
-\Vref{tab:ex:cref} shows a simple fact, although \vref{tab:ex:cref} could also show something else.
+\mynote{when i was identifying EOG channels, jevri said it should have step/box-like shapes in the signal. also, the gaze position signal (L POR X) also has box-like shapes. it would make sense if xcorr between two step functions gives a triangle with linear lobes. i need actual pictures of the data if i want to make this claim though}
 
-\Vref{sec:ex:cref} shows a simple fact, although \vref{sec:ex:cref} could also show something else.
-\end{ltgexample}
-\section{Miscellaneous Examles}
-\label{ssec:example}
-
-Referencetest: \Cref{ssec:example}, \cref{fig:Abbildung} und \cref{alg:example}.
-
-\begin{ltgexample}
-Checkmark: \dingcheck.
-Crossmark: \dingcross.
-\end{ltgexample}
-
-\begin{figure}
-  \missingfigure{}
-  \caption{Abbildung}
-  \label{fig:Abbildung}
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.8\textwidth]{syncquality_tobii.jpg}
+  \caption{Cross-correlation plot from EYE-EEG \cite{eyeeeg}}
+  \label{fig:syncquality_tobii}
 \end{figure}
 
-\begin{landscape}
-  \begin{figure}
-    \missingfigure{}
-    \caption{Gedrehte Abbildung}
-    \label{fig:AbbildungGedreht}
-  \end{figure}
-\end{landscape}
+\mynote{maybe mention band pass filtering done in the fork}
 
-\subsection{Algorithmen}
-
-\begin{algorithm}
-  \caption{$algo$}
-  \label{alg:example}
-  \begin{algorithmic}[1]
-    \State $a \gets 0$
-    \State State 2\label{alg1:state2}
-  \end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}
-  \caption{Algorithmus 2}
-  \label{alg:example2}
-  \begin{algorithmic}[1]
-    \State $a \gets 0$
-    \State State 2\label{alg2:state2}
-  \end{algorithmic}
-\end{algorithm}
-
-\Cref{alg:example} hat bereits einen Algorithmus gezeigt.
-Test der Zeilenreferenzierung: Zeile~\ref{alg1:state2} (\cref{alg:example}) und Zeile~\ref{alg2:state2} (\cref{alg:example2}).
-
-\subsection{Definitionen}
-\begin{definition}[Title]
-  \label{def:def1}
-  Definition Text
-\end{definition}
-
-\Cref{def:def1} zeigt \ldots
-
-\subsection{Aufzählungen}
-
-\begin{enumerate}[label=\alph*)]
-  \item a
-  \item b
-  \item c
-  \item d
-\end{enumerate}
-
-Equivalent to paralist's inparaenum:
-\begin{enumerate*}[label=\alph*)]
-  \item a
-  \item b
-  \item c
-  \item d
-\end{enumerate*}
-
-\begin{description}
-  \item[first] Erstens
-  \item[second] Zweitens
-  \item[third] Drittens
-\end{description}
-
-\begin{description}
-  \item[\texttt{first}] Erstens
-  \item[\texttt{second}] Zweitens
-  \item[\texttt{third}] Drittens
-\end{description}
-
-%works only if package enumitem is loaded
-\begin{description}[font=\ttfamily]
-  \item[first] Erstens
-  \item[second] Zweitens
-  \item[third] Drittens
-\end{description}
-
-\begin{description}[style=unboxed]
-  \item[first label with a long description text breaking over one line. Enabled by enumitem package] Erstens
-  \item[second] Zweitens
-  \item[third] Drittens
-\end{description}
-
-\begin{Description}
-  \item[first label with a long description text breaking over one line. Defined in template.tex] Erstens
-  \item[second] Zweitens
-  \item[third] Drittens
-\end{Description}
-
+To automatically assess the desirability of the cross correlation curve, some dedicated measurements are made, including:
 \begin{itemize}
-  \item Erstens
-  \item Zweitens
-  \item Drittens
+  \item \textbf{Peak position and height:} The peak position should be close to 0 lag. The height strongly depends on the subject, but it should be the highest peak in the entire plot. Additionally, measurements of the second highest peak in the plot are made, so it can be determined how prominent/distinct the center spike is. If the second highest peak of the cross correlation curve is very far from 0 lag and almost as high, it may be an indicator that the center peak is just coincidence \mynote{reformulate, very bad paragraph} 
+  \item \textbf{Similarity to `template curve':} As seen in \cref{fig:syncquality_tobii}, an optimal cross correlation curve will have linear lobes downwards from its peak. Using the value of the plot at zero lag and computed endpoints for the lobes on either side, a triangular `template curve' is constructed, that is expected to have high similarity with the cross correlation curve iff the signals are well aligned \mynote{reformulate and also elaborate here. specifically how exactly are the endpoints for the lobes chosen: usually where the xcorr plot crosses y=0, but if this does not happen, it attempts to find prominent valleys instead}. \mynote{the similarity with the template curve is calculated in different ways like cosine similarity and kullback leibler divergence}
+  \item \mynote{lobe steepness of the template curve: steeper is better. also symmetric (i.e. similar steepnesses for both lobes) is probably also better?}
+  \item \mynote{kurtosis of the cross correlation curve. todo}
+  \item \mynote{how many peaks are around the center of the plot? to see if it is 1 prominent peak or many peaks}
 \end{itemize}
 
-Optionaler Parameter ändert den Marker, der vorangestellt ist.
-Siehe \url{http://www.weinelt.de/latex/item.html}.
-\begin{itemize}
-  \item[A] Erstens
-  \item[B] Zweitens
-  \item[C] Drittens
-\end{itemize}
+\mynote{could it make sense to test the xcorr curve with different offsets and see how high the highest peak is with these random offsets? if the peaks are just as high as when synchronized, the xcorr curve is probably worthless for this subject}
 
-Falsche Benutzung des optionalen Parameters wie folgt:
-\begin{itemize}
-  \item[first] Erstens
-  \item[second] Zweitens
-  \item[third] Drittens
-\end{itemize}
-Dabei ist zu beachten, dass es sich bei Einbindung von \texttt{enumitem} anders verhält als bei \texttt{paralist}.
 
-\subsection{fquote}
+\subsection{Evaluation of quality metrics}
 
-\begin{fquote}[T.\ Informatiker]
-  Bis nächsten Freitag ist das Programm fertig.
-\end{fquote}
+\mynote{add histograms of select metrics where interesting} \\
+\mynote{create scatterplot of median\_abs\_sync\_error\_ms vs snr. could be interesting to see how strong the correlation is, and whether there are any clusters} \\
+\mynote{research if there is an established treshold for xcorr value in literate} \\
+\mynote{perhaps the only `objective' metric of synchronization quality is the median\_abs\_sync\_error\_ms. if it's off by more than 2 ET samples on average, synchronization is probably off} \\
+\mynote{multiple things have already been attempted here, but probably nothing that will remain in its current form, so not documenting it here yet} \\
 
-\begin{gfquote}{T.\ Informatiker}
-  Bis nächsten Freitag ist das Programm fertig.
-\end{gfquote}
+
+\section{Preprocessing}
+
+\mynote{entire section is just notes for now}
+
+\begin{verbatim}
+
+# needs to be set to ignore analysis and only do preprocessing
+task_is_rest = True
+# these need to be set also
+# see https://github.com/mne-tools/mne-bids-pipeline/issues/1020
+rest_epochs_duration = 5
+rest_epochs_overlap = 0
+
+# these are forced by ICALABEL
+l_freq: float | None = 1
+h_freq: float | None = 100
+eeg_reference = "average"
+
+# data was recorded in the US
+notch_freq = 60
+
+# size of the dataset requires icalabel
+ica_algorithm = "picard-extended_infomax"
+ica_use_icalabel = True
+ica_reject = "autoreject_local" 
+
+# no epoch rejection, we need continuous data
+reject = None 
+
+# enable eye-tracking synchronization
+sync_eyelink = True
+sync_eye = True
+
+# cover all symbol search trigger events
+sync_eventtype_regex     = r"(?:trialResponse|newPage)" #r"trialResponse"
+sync_eventtype_regex_et  = r"# Message: (?:14|20)" #r"# Message: 14"
+
+# HBN setup paper lists the following electrodes as being EOG electrodes:
+# 8, 14, 17, 21, 25, 125, 126, 127, 128
+# looking at the 3d montage, this is the only
+# set of these electrodes that makes sense here
+eeg_bipolar_channels = {
+    "HEOG": ("E8", "E25"),   # left vs right outer canthus
+    "VEOG": ("E21", "E17"),  # nasion vs left inner canthus
+}
+
+eog_channels = ["HEOG", "VEOG"]
+sync_heog_ch = "HEOG"
+sync_et_ch = ("L POR X [px]", "R POR X [px]")
+montage = mne.channels.make_standard_montage("GSN-HydroCel-128")
+eeg_template_montage = montage
+drop_channels = ["Cz"]
+
+\end{verbatim}
+
+
+
+
+
+
+
+
 
 
 %%% ===============================================================================
-\chapter{Conclusion and Outlook}\label{sec:conclusion}
+\chapter{TODO}\label{sec:conclusion}
 %%% ===============================================================================
 
-Your conclusions are not just a factual summary of your work, but they position, interpret, and defend your findings against the state of the art that you discussed in \cref{sec:introduction:state-of-art}.
-You specifically outline which concrete findings or methodological contributions advance our knowledge towards the general objective you introduced in \cref{sec:introduction:topic}.
-Objectively discuss which parts you solved and in which parts you failed.
-
-You should explicitly discuss limitations and shortcomings of your work and detail what kind of future studies are needed to overcome these limitations.
-Be specific in the sense that your arguments for future work should be based on concrete findings and insights you obtained in your report.
+- use consistent tense when writing (currently switching between past and present) \\
+- properly cite everything \\
 
 
 %%% ===============================================================================
 %%% Bibliography
 %%% ===============================================================================
 
-In the bibliography, use \texttt{\textbackslash textsuperscript} for \enquote{st}, \enquote{nd}, \ldots:
-E.g., \enquote{The 2\textsuperscript{nd} conference on examples}.
-When you use \href{https://www.jabref.org}{JabRef}, you can use the clean up command to achieve that.
-See \url{https://help.jabref.org/en/CleanupEntries} for an overview of the cleanup functionality.
 
 \printbibliography
 
@@ -1884,7 +1196,8 @@ All links were last followed on October 5, 2020.
 \chapter{My first appendix}\label{sec:appendix1}
 %%% ===============================================================================
 
-\lipsum[1]
+%\lipsum[1]
+Sample Appendix
 
 \pagestyle{empty}
 \renewcommand*{\chapterpagestyle}{empty}

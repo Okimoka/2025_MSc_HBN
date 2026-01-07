@@ -27,7 +27,7 @@ runs = ["1"]
 et_has_run = False
 et_has_task = True
 
-epochs_tmin = 0
+#epochs_tmin = 0
 #rest_epochs_duration = 10
 #rest_epochs_overlap = 0
 baseline = None
@@ -37,7 +37,7 @@ baseline = None
 
 eeg_reference = "average"
 
-ica_l_freq = 1 # ?
+#ica_l_freq = 1 # default
 
 # determined by icalabel
 l_freq: float | None = 1
@@ -73,7 +73,7 @@ ica_use_icalabel = True
 #ica_reject: dict[str, float] | Literal["autoreject_local"] | None = "autoreject_local"
 
 ica_reject = "autoreject_local" #TESTING
-reject = "autoreject_local" #TESTING
+reject = None #"autoreject_local" #TESTING
 
 #These are identical, just ensuring compatibility
 sync_eyelink = True
