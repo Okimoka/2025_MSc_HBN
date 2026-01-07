@@ -1006,6 +1006,8 @@ It works by lining up shared events in the EEG and eye-tracking recording. The o
 
 Due to the number of shared events being the only grounds for synchronization accuracy, the movie watching paradigms in the dataset were unsuitable for this study, containing only 2 shared events per recording. This only left the symbol search paradigm \ref{sssec:paradigms} as a candidate to analyze \mynote{depending on how quality scoring turns out, some movie recordings will likely still be used if deemed to have good synchronization despite small shared event count}.
 
+\mynote{@jevri if i have a movie watching run, and all quality metrics look good, is it fine to still consider it for analysis even though it only has two shared events? or should i blanket ban all recordings with shared events under some treshold? i feel like if the xcorr curve looks good, it still might be worth considering}
+
 \subsection{Parsing of eye-tracking data}
 
 Eye-tracking data in the HBN dataset were recorded using the iView-X Red-m by SensoMotoric Instruments \cite{hbn}. These recordings usually come in a proprietary \texttt{.idf} format, but were converted to \texttt{.txt} and \texttt{.tsv} for almost all subjects \mynote{give exact number. maybe mention that despite the converter being obsolete/abandonware, there seem to exist alternatives for conversion. however no .idf files remain in the dataset so this is irrelevant}.
@@ -1064,6 +1066,8 @@ The cross-correlation is computed between the horizontal EOG (HEOG) signal and t
 An exemplary cross correlation plot between gaze position and EOG can be found in the documentation of the EYE-EEG toolbox. As can be seen, the cross correlation peaks at zero lag with a parabola-like shape at the tip, and with symmetric linear lobes.
 
 \mynote{when i was identifying EOG channels, jevri said it should have step/box-like shapes in the signal. also, the gaze position signal (L POR X) also has box-like shapes. it would make sense if xcorr between two step functions gives a triangle with linear lobes. i need actual pictures of the data if i want to make this claim though}
+
+\mynote{@jevri: do you have an idea why this xcorr curve could look so different from the one outputted by the mne-bids-pipeline fork? I looked at the code and this should also just be the xcorr between EOG and gaze position (not gaze velocity or something like that)}
 
 \begin{figure}[htb]
   \centering
