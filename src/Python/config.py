@@ -1,84 +1,79 @@
 import mne
 
-bids_root = "extractedDataset"
-deriv_root = "extractedDataset/derivatives"
+#0 = symbolsearch
+#1 = freeView (all merged)
+EXPERIMENT = 0
+
+bids_root = "mergedDataset"
+deriv_root = "mergedDataset/derivs"
 subjects_dir = None
-#subjects = ["NDARAB678VYW","NDARDC504KWE","NDARDL033XRG","NDARTK720LER","NDARDZ794ZVP"] #"all" #["NDARAG429CGW"]
-#subjects = ["NDARDZ794ZVP"] #"all" #["NDARAG429CGW"]
-#subjects = ["NDARAB678VYW"] ##["NDARKM301DY0"] #"all"
-#subjects = ["NDARAF535XK6"]
-#subjects = ["NDARUC804LKP","NDARVD609JNZ","NDARGN483WFH","NDARFY623ZTE","NDARFN221WW5","NDARXR865BVX","NDARRK528GFZ","NDARKP823HEM","NDARYA857NDW","NDARUR298LVX","NDARWT403LP6","NDARDL033XRG","NDARYJ413BLN","NDARLP413TUX","NDARLM981MEN","NDARKG016KD1","NDARAG788YV9","NDARUA035YJN","NDARNP381RZ4","NDARZG044CJ5","NDARHT518WEM","NDARDX544FJ0","NDARKM199DXW","NDARWC905XUG","NDARYH501UH3","NDARRK146XCZ"]
-#subjects = ["NDARUC804LKP"]
 
-#subjects = ["NDARUR924XNN","NDARUX070CWZ","NDARUX422KT3","NDARUX616RC1","NDARUY720JW1","NDARUZ221YL6","NDARVA602LMV","NDARVB261JUT","NDARVB972ZKQ","NDARVD437JV0","NDARVD609JNZ","NDARVM326HYM","NDARVN232MNL","NDARWC905XUG","NDARWF697JCF","NDARWG174EZD","NDARWH019XM7","NDARWK625CUV"]
-
-subjects = ["NDARAB678VYW"]
+#subjects = ["NDARAB678VYW"]
+#subjects = ["NDARJA830BYV","NDARHP841RMR","NDARVD609JNZ","NDARAY461TZZ","NDARKT714TXR","NDARXU902BRT","NDARMF116AFR","NDARWB782FLR","NDARGN483WFH","NDARNH200DA6","NDARKX665ZD3","NDARVT488RXJ","NDARFY623ZTE","NDARRB942UWU","NDARRK135YAZ","NDARHZ413DZL","NDARCT889DMB"]
+subjects = ["NDARJA830BYV"]
 
 ch_types = ["eeg"]
 interactive = False
-sessions = "all"
-task = "symbolSearch"
+sessions = []
+task = ["symbolSearch","freeView"][EXPERIMENT]
+#task = "symbolSearch"
 #task_et = "WISC_ProcSpeed"
 
 task_is_rest = True
-rest_epochs_duration = 5
-rest_epochs_overlap = 0
-runs = ["1"]
+runs = ["1", "all"][EXPERIMENT]
 et_has_run = False
 et_has_task = True
 
-#epochs_tmin = 0
-#rest_epochs_duration = 10
-#rest_epochs_overlap = 0
-baseline = None
-#baseline: tuple[float | None, float | None] | None = (-0.2, 0)
+epochs_tmin = 0 #forced for rest 
+epochs_tmax = 1
+rest_epochs_duration = 1 #forced for rest, make small so not too much gets rejected
+rest_epochs_overlap = 0 #forced to be set
+baseline = None # for later Unfold analysis
 
 #raw_resample_sfreq: float | None = 250
-
-eeg_reference = "average"
-
-#ica_l_freq = 1 # default
+# plenty of papers use these values for HBN EEG
+# dimigen+ehinger paper uses 0.1 Hz for their FRPs
+l_freq: float | None = 0.1 
+h_freq: float | None = 100
 
 # determined by icalabel
-l_freq: float | None = 1
-h_freq: float | None = 100
 ica_h_freq: float | None = 100
+ica_l_freq = 1
+eeg_reference = "average"
 
 # data was recorded in the US
 notch_freq = 60
 
 on_error = "continue"
 
-
 ######### Remove these when doing Unfold analysis! ############
 
 # positive / negative feedback
 #conditions = ["HAPPY", "SAD"]
-##conditions = ["Fixation L"]
-##
-##epochs_tmin: float = -0.5
-##epochs_tmax: float = 2.6 # since feedback is so infrequent, long epochs are okay
-##
-##baseline: tuple[float | None, float | None] | None = (-0.2, 0)
-###############################################################
+########conditions = ["# Message: 12XX", "# Message: 13XX"]
 
+########epochs_tmin: float = -0.5
+########epochs_tmax: float = 2.6 # since feedback is so infrequent, long ########epochs are okay
+########
+########baseline: tuple[float | None, float | None] | None = (-0.2, 0)
+###############################################################
 
 
 spatial_filter = "ica"
 # ica_n_components = 96 ?
+# icalabel forces picard-extended_infomax or extended_infomax
 ica_algorithm = "picard-extended_infomax"
 #ica_use_ecg_detection: bool = True
 #ica_use_eog_detection: bool = True
 ica_use_icalabel = True
 #ica_reject: dict[str, float] | Literal["autoreject_local"] | None = "autoreject_local"
 
-ica_reject = "autoreject_local" #TESTING
-reject = None #"autoreject_local" #TESTING
+#ica_reject = "autoreject_local"
+ica_reject = dict(eeg=200e-6)
 
-#These are identical, just ensuring compatibility
-sync_eyelink = True
-sync_eye = True
+#reject = "autoreject_local"
 
+sync_eyelink = [True, False][EXPERIMENT]
 #sync_eventtype_regex = "\\d-trigger=10 Image moves"
 #sync_eventtype_regex_et = "trigger=10 Image moves"
 
@@ -86,18 +81,17 @@ sync_eye = True
 #sync_eventtype_regex     = r"contrastTrial_start"
 #sync_eventtype_regex_et  = r"# Message: 15"
 
-sync_eventtype_regex     = r"(?:trialResponse|newPage)" #r"trialResponse"
-sync_eventtype_regex_et  = r"# Message: (?:14|20)" #r"# Message: 14"
-
-#sync_eventtype_regex     = r"trialResponse"
-#sync_eventtype_regex_et  = r"# Message: 14"
-
+# does it make sense to sync over full freeViewing? Probably not
+sync_eventtype_regex     = r"(?:trialResponse|newPage)"
+sync_eventtype_regex_et  = r"# Message: (?:14|20)"
 
 #eog_channels = ["HEOGL", "HEOGR", "VEOGL", "VEOGU"]
+
 
 #eeg_bipolar_channels = {"HEOG": ("HEOGL", "HEOGR"), "VEOG": ("VEOGL", "VEOGU")}
 #eog_channels = ["HEOG", "VEOG"]
 #sync_heog_ch = ("HEOG")
+
 
 
 #eeg_bipolar_channels = {"HEOG": ("E40", "E109"),
@@ -110,24 +104,6 @@ sync_eventtype_regex_et  = r"# Message: (?:14|20)" #r"# Message: 14"
 
 
 eeg_bipolar_channels = {
-    #"HEOG": ("E127", "E126"),
-
-    # Version 1, doesn't work well
-    #### "HEOG": ("E127", "E126"), 
-    #### "VEOG": ("E22", "E127"), #left eye
-
-    # Version 2, works well but not sure why
-    ###"HEOG": ("E109", "E40"),
-    ###"VEOG": ("E22", "E127"), 
-
-    # Version 3, seems to work well?
-    #"HEOG": ("E2", "E26"),
-    #"VEOG": ("E3", "E8")
-
-    ### Version 4 bad
-    ##"HEOG": ("E21", "E25"),
-    ##"VEOG": ("E25", "E8")
-
     "HEOG": ("E8", "E25"),   # left vs right outer canthus
     "VEOG": ("E21", "E17"),  # nasion vs left inner canthus
 
@@ -140,6 +116,7 @@ sync_heog_ch = "HEOG"
 
 sync_et_ch = ("L POR X [px]", "R POR X [px]")
 
+
 #sync_et_ch = "xpos_right"
 sync_plot_samps = 3000
 
@@ -151,4 +128,4 @@ montage = mne.channels.make_standard_montage("GSN-HydroCel-128")
 eeg_template_montage = montage
 drop_channels = ["Cz"]
 
-n_jobs = 6
+n_jobs = 2

@@ -52,7 +52,8 @@ def ensure_dir(p):
 def file_size(p):
     try:
         return os.path.getsize(p)
-    except OSError:
+    except OSError as e:
+        print(f"file_size: Could not get size for {p}: {e}")
         return 0
 
 # ---------- list S3 (ListObjectsV2, unsigned)
@@ -178,12 +179,22 @@ class Downloader:
                     raise IOError("size_mismatch_after_download")
 
             except (HTTPError, URLError, ConnectionResetError, TimeoutError, IOError) as e:
+
+                got = file_size(stage_path)
+                if got == size:
+                    os.replace(stage_path, final_path)
+                    self.log(self.ok_log, f"OK\t{rel_key}")
+                    with self.print_lock:
+                        print(f"OK   {rel_key} (completed despite exception)")
+                    return True
+
                 # Backoff and retry
                 back = min(60, 2 ** attempt)
                 with self.print_lock:
                     got = file_size(stage_path)
                     print(f"RETRY {rel_key} attempt {attempt}/{self.max_attempts} "
                           f"status={getattr(e, 'code', 'NA')} size={got}/{size} sleep={back}s")
+
                 time.sleep(back)
                 continue
 
