@@ -1,7 +1,8 @@
 import mne
 
 #0 = symbolsearch
-#1 = freeView (all merged)
+#1 = freeView (all free view merged)
+#2 = allTasks (all tasks merged)
 EXPERIMENT = 0
 
 bids_root = "mergedDataset"
@@ -15,15 +16,14 @@ subjects = ["NDARJA830BYV"]
 ch_types = ["eeg"]
 interactive = False
 sessions = []
-task = ["symbolSearch","freeView"][EXPERIMENT]
-#task = "symbolSearch"
+task = ["symbolSearch","freeView","allTasks"][EXPERIMENT]
 #task_et = "WISC_ProcSpeed"
 
-task_is_rest = True
-runs = ["1", "all"][EXPERIMENT]
+runs = [["1"], "all", "all"][EXPERIMENT]
 et_has_run = False
 et_has_task = True
 
+task_is_rest = True
 epochs_tmin = 0 #forced for rest 
 epochs_tmax = 1
 rest_epochs_duration = 1 #forced for rest, make small so not too much gets rejected
@@ -50,17 +50,18 @@ on_error = "continue"
 
 # positive / negative feedback
 #conditions = ["HAPPY", "SAD"]
-########conditions = ["# Message: 12XX", "# Message: 13XX"]
+#conditions = ["# Message: 12XX", "# Message: 13XX"]
 
-########epochs_tmin: float = -0.5
-########epochs_tmax: float = 2.6 # since feedback is so infrequent, long ########epochs are okay
-########
-########baseline: tuple[float | None, float | None] | None = (-0.2, 0)
+#epochs_tmin: float = -0.5
+#epochs_tmax: float = 2.6 # since feedback is so infrequent, long epochs are okay?
+
+#baseline: tuple[float | None, float | None] | None = (-0.2, 0)
 ###############################################################
 
 
 spatial_filter = "ica"
 # ica_n_components = 96 ?
+
 # icalabel forces picard-extended_infomax or extended_infomax
 ica_algorithm = "picard-extended_infomax"
 #ica_use_ecg_detection: bool = True
@@ -69,56 +70,34 @@ ica_use_icalabel = True
 #ica_reject: dict[str, float] | Literal["autoreject_local"] | None = "autoreject_local"
 
 #ica_reject = "autoreject_local"
-ica_reject = dict(eeg=200e-6)
-
+# other common values like 200 drop too many epochs for free viewing tasks
+# this way we can retain epochs with blinks
+ica_reject = dict(eeg=600e-6)
 #reject = "autoreject_local"
 
-sync_eyelink = [True, False][EXPERIMENT]
-#sync_eventtype_regex = "\\d-trigger=10 Image moves"
-#sync_eventtype_regex_et = "trigger=10 Image moves"
+if (EXPERIMENT == 0):
 
-#Contrast detection
-#sync_eventtype_regex     = r"contrastTrial_start"
-#sync_eventtype_regex_et  = r"# Message: 15"
+    sync_eyelink = True
+    #sync_eventtype_regex = "\\d-trigger=10 Image moves"
+    #sync_eventtype_regex_et = "trigger=10 Image moves"
 
-# does it make sense to sync over full freeViewing? Probably not
-sync_eventtype_regex     = r"(?:trialResponse|newPage)"
-sync_eventtype_regex_et  = r"# Message: (?:14|20)"
+    # unfortunately, syncing over full freeView is not possible
+    # as ET timestamps are absolute (start at 0) instead of being global from the full session
+    # TODO create regexes for the other tasks as well
+    sync_eventtype_regex     = r"(?:trialResponse|newPage)"
+    sync_eventtype_regex_et  = r"# Message: (?:14|20)"
 
-#eog_channels = ["HEOGL", "HEOGR", "VEOGL", "VEOGU"]
+    eeg_bipolar_channels = {
+        "HEOG": ("E8", "E25"),   # left vs right outer canthus
+        "VEOG": ("E21", "E17"),  # nasion vs left inner canthus
 
+    }
 
-#eeg_bipolar_channels = {"HEOG": ("HEOGL", "HEOGR"), "VEOG": ("VEOGL", "VEOGU")}
-#eog_channels = ["HEOG", "VEOG"]
-#sync_heog_ch = ("HEOG")
+    eog_channels = ["HEOG", "VEOG"]
+    sync_heog_ch = "HEOG"
+    sync_et_ch = ("L POR X [px]", "R POR X [px]")
 
-
-
-#eeg_bipolar_channels = {"HEOG": ("E40", "E109"),
-#                            "VEOG": ("E21",  "E127")} #left eye
-##eeg_bipolar_channels = {
-##    #"HEOG": ("E127", "E126"),
-##    "HEOG": ("E126", "E127"),
-##    "VEOG": ("E22", "E127"), #left eye
-##}
-
-
-eeg_bipolar_channels = {
-    "HEOG": ("E8", "E25"),   # left vs right outer canthus
-    "VEOG": ("E21", "E17"),  # nasion vs left inner canthus
-
-}
-
-
-eog_channels = ["HEOG", "VEOG"]
-
-sync_heog_ch = "HEOG"
-
-sync_et_ch = ("L POR X [px]", "R POR X [px]")
-
-
-#sync_et_ch = "xpos_right"
-sync_plot_samps = 3000
+    sync_plot_samps = 3000 # width of the xcorr plot
 
 decode: bool = False
 run_source_estimation = False

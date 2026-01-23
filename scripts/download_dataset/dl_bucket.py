@@ -52,6 +52,8 @@ def ensure_dir(p):
 def file_size(p):
     try:
         return os.path.getsize(p)
+    except FileNotFoundError:
+        return 0
     except OSError as e:
         print(f"file_size: Could not get size for {p}: {e}")
         return 0
@@ -149,7 +151,7 @@ class Downloader:
 
         while attempt < self.max_attempts:
             attempt += 1
-            start_sz = file_size(stage_path)
+            start_sz = os.path.getsize(stage_path) if os.path.exists(stage_path) else 0
             headers = {"User-Agent": "python-s3-dl/1.0"}
             if start_sz > 0 and start_sz < size:
                 headers["Range"] = f"bytes={start_sz}-"
