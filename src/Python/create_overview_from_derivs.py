@@ -1,71 +1,105 @@
 """
-Create an Excel overview from *_proc-eyelink_metrics.json files (LLM Code)
+Create a CSV overview from *_proc-eyelink_metrics.json files.
 
-Usage:
-  python create_overview_from_derivs.py \
-    --derivs-root ./extractedDataset/derivs \
-    --out sync_metrics_overview.xlsx
+Behavior:
+- Only searches: <DERIVS_ROOT>/sub-*/misc/**/_proc-eyelink_metrics.json
+- Writes:
+  1) OUT_CSV (main overview)
+  2) OUT_LEGEND_CSV (legend)
+
+Edit DERIVS_ROOT and OUT_CSV below.
 """
 
-import argparse
 import json
 from pathlib import Path
+
 import pandas as pd
-import re
 
 PATTERN = "*_proc-eyelink_metrics.json"
 
 LEGEND = {
     "subject": "Anonymized identifier for the subject",
     "release": "Release number which this subject appeared in",
-    "TODO": "TODO"
+    "TODO": "TODO",
 }
+
+# ----------------------------
+# Hardcoded input/output paths
+# ----------------------------
+DERIVS_ROOT = Path("/data/work/st156392/mergedDataset/derivatives")
+OUT_CSV = Path("/data/work/st156392/mergedDataset/derivatives/sync_metrics_overview.csv")
+# Legend will be written next to OUT_CSV:
+OUT_LEGEND_CSV = OUT_CSV.with_name(OUT_CSV.stem + "_legend.csv")
+
+
+def iter_metric_files(root: Path):
+    """
+    Search optimization:
+    - Only folders beginning with 'sub-' under root
+    - Only inside each 'sub-*/misc' folder
+    - Only JSONs matching PATTERN
+    """
+    root = root.resolve()
+    if not root.exists():
+        return []
+
+    files = []
+    for subdir in sorted(p for p in root.iterdir() if p.is_dir() and p.name.startswith("sub-")):
+        misc = subdir / "misc"
+        if misc.is_dir():
+            # Use rglob to be robust if files are nested under misc,
+            # but still constrained to misc only.
+            files.extend(sorted(misc.rglob(PATTERN)))
+    return files
 
 
 def main():
-    p = argparse.ArgumentParser(description="Summarize metrics JSONs to a single .xlsx")
-    p.add_argument("--derivs-root", type=Path, default=Path("./extractedDataset/derivs"),
-                   help="Path to derivatives root (default: ./extractedDataset/derivs)")
-    p.add_argument("--out", type=Path, default=Path("sync_metrics_overview.xlsx"),
-                   help="Output Excel filename (default: sync_metrics_overview.xlsx). "
-                        "If relative, it will be saved under --derivs-root.")
-    args = p.parse_args()
+    root = DERIVS_ROOT.resolve()
+    out_path = OUT_CSV.resolve()
+    out_legend_path = OUT_LEGEND_CSV.resolve()
 
-    root = args.derivs_root.resolve()
-    out_path = args.out if args.out.is_absolute() else (root / args.out)
+    files = iter_metric_files(root)
 
-    files = sorted(root.rglob(PATTERN))
     rows = []
     columns = []  # first-seen column order across all files
     taskname = None
 
     for f in files:
         with open(f, "r", encoding="utf-8") as fh:
-            data = json.load(fh)  # assume numbers, strings, or NaN
-        # preserve per-file key order and append any new keys globally in first-seen order
-        if taskname is None and "task" in data:
-            taskname = data["task"]
+            data = json.load(fh)  # assume numbers, strings, or NaN/None
+
+        if taskname is None and isinstance(data, dict) and "task" in data:
+            taskname = data.get("task")
+
+        # preserve per-file key order and append new keys globally in first-seen order
         for k in data.keys():
             if k not in columns:
                 columns.append(k)
+
         rows.append(data)
 
     df = pd.DataFrame(rows)
     if columns:
         df = df.reindex(columns=columns)
 
-    legend_df = pd.DataFrame({"column": list(LEGEND.keys()),
-                              "description": list(LEGEND.values())})
+    legend_df = pd.DataFrame(
+        {"column": list(LEGEND.keys()), "description": list(LEGEND.values())}
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with pd.ExcelWriter(out_path, engine="openpyxl") as xw:
-        df.to_excel(xw, sheet_name=taskname, index=False)
-        legend_df.to_excel(xw, sheet_name="legend", index=False)
+    # Write CSVs
+    df.to_csv(out_path, index=False)
+    legend_df.to_csv(out_legend_path, index=False)
 
-    print(f"Wrote {len(df)} rows, {len(df.columns)} columns -> {out_path} "
-          f"(main sheet: '{taskname}', legend rows: {len(legend_df)})")
+    task_label = taskname if taskname else "N/A"
+    print(
+        f"Found {len(files)} files under {root}/sub-*/misc\n"
+        f"Wrote {len(df)} rows, {len(df.columns)} columns -> {out_path}\n"
+        f"Wrote legend ({len(legend_df)} rows) -> {out_legend_path}\n"
+        f"First task value seen: {task_label}"
+    )
+
 
 if __name__ == "__main__":
     main()
-

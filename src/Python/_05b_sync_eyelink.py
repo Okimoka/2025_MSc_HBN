@@ -1,23 +1,26 @@
 from types import SimpleNamespace
-from datetime import datetime, timezone
-from collections import Counter
 import mne
 import os.path
 import re
-import json
-import csv
 import numpy as np
-import pandas as pd
+from io import StringIO
 from mne_bids import BIDSPath
+import pandas as pd
+from numpy.polynomial.polynomial import Polynomial
+from scipy.optimize import curve_fit
 from scipy.signal import correlate, find_peaks, peak_prominences
-from scipy.integrate import simpson
-from scipy.stats import kurtosis
+import csv
+import json
+from collections import Counter
+
 from ..._config_utils import (
     _bids_kwargs,
     get_eeg_reference,
     get_runs,
     get_sessions,
     get_subjects,
+    _get_ss,
+    _get_ssrt
 )
 from ..._import_data import annotations_to_events, make_epochs
 from ..._logging import gen_log_kwargs, logger
@@ -26,68 +29,53 @@ from ..._reject import _get_reject
 from ..._report import _open_report
 from ..._run import _prep_out_files, _update_for_splits, failsafe_run, save_logs
 
+ZERO_INVALID_ET_CHANNELS: tuple[str, ...] = (
+    "L Raw X [px]",
+    "L Raw Y [px]",
+    "R Raw X [px]",
+    "R Raw Y [px]",
+    "L Dia X [px]",
+    "L Dia Y [px]",
+    "L Mapped Diameter [mm]",
+    "R Dia X [px]",
+    "R Dia Y [px]",
+    "R Mapped Diameter [mm]",
+    "L CR1 X [px]",
+    "L CR1 Y [px]",
+    "L CR2 X [px]",
+    "L CR2 Y [px]",
+    "R CR1 X [px]",
+    "R CR1 Y [px]",
+    "R CR2 X [px]",
+    "R CR2 Y [px]",
+    "L POR X [px]",
+    "L POR Y [px]",
+    "R POR X [px]",
+    "R POR Y [px]",
+    "L EPOS X",
+    "L EPOS Y",
+    "L EPOS Z",
+    "R EPOS X",
+    "R EPOS Y",
+    "R EPOS Z",
+    "L GVEC X",
+    "L GVEC Y",
+    "L GVEC Z",
+    "R GVEC X",
+    "R GVEC Y",
+    "R GVEC Z",
+)
 
-# taken from mne.annotations and adapted to support concatenation of "extras" (supported since mne 1.10)
-# without this modification, extras get lost when combined
-def _combine_annotations(
-    one, two, one_n_samples, one_first_samp, two_first_samp, sfreq
-):
-    """Combine a tuple of annotations."""
-    assert one is not None
-    assert two is not None
-    shift = one_n_samples / sfreq  # to the right by the number of samples
-    shift += one_first_samp / sfreq  # to the right by the offset
-    shift -= two_first_samp / sfreq  # undo its offset
-    onset = np.concatenate([one.onset, two.onset + shift])
-    duration = np.concatenate([one.duration, two.duration])
-    description = np.concatenate([one.description, two.description])
-    ch_names = np.concatenate([one.ch_names, two.ch_names])
-
-    # extras: keep if either side has them
-    extras = None
-    if getattr(one, "extras", None) is not None or getattr(two, "extras", None) is not None:
-        one_extras = list(getattr(one, "extras", []))
-        two_extras = list(getattr(two, "extras", []))
-
-        if not one_extras:
-            one_extras = [None] * len(one.onset)
-        if not two_extras:
-            two_extras = [None] * len(two.onset)
-
-        extras = one_extras + two_extras
-
-    return mne.Annotations(
-        onset,
-        duration,
-        description,
-        orig_time=one.orig_time,
-        ch_names=ch_names,
-        extras=extras,
-    )
-
-
-
-"""
-"Pyramid"-like curve to compare the xcorr peak against
-The shape of the pyramid is determined by leftIndex, middleIndex, rightIndex (three corners)
-and peakvalue (height of the pyramid).
-"""
-def xcorr_template_curve(length=0, leftIndex=0, middleIndex=0, peakvalue=0.0, rightIndex=0):
-    a = np.zeros(length)
-    #just to be sure indexes are not oob
-    s = max(0, min(leftIndex, length - 1))
-    p = max(0, min(middleIndex, length - 1))
-    e = max(0, min(rightIndex, length - 1))
-    if p > s:
-        for i in range(s, p + 1):
-            a[i] = peakvalue * (i - s) / (p - s)
-    if e > p:
-        for i in range(p, e + 1):
-            a[i] = peakvalue * (e - i) / (e - p)
-    return a
+STEP_LIKE_ET_CHANNELS: tuple[str, ...] = (
+    "Timing",
+    "L Validity",
+    "R Validity",
+    "Pupil Confidence",
+    "L Plane",
+    "R Plane",
+)
 
 
-# Some ET files contain unparseable non-ASCII symbols
 def ascii_sanitize(s: str) -> str:
     s = (s.replace("°", "deg")
            .replace("µ", "u")
@@ -95,162 +83,194 @@ def ascii_sanitize(s: str) -> str:
     return s.encode("ascii", "ignore").decode("ascii")
 
 
-"""
-Demean both signals, compute cross-correlation, and L2-normalize.
-Returns zeros if either signal is flat.
-"""
-def normalized_xcorr(s1, s2, mode="full"):
-    assert len(s1) == len(s2)
-    s1 = np.asarray(s1, float)
-    s2 = np.asarray(s2, float)
-    s1 = s1 - np.mean(s1)
-    s2 = s2 - np.mean(s2)
-
-    corr = correlate(s1, s2, mode=mode)
-    denom = np.linalg.norm(s1) * np.linalg.norm(s2)
-    if denom > 0:
-        return corr / denom, denom
-    return np.zeros_like(corr), 0
+def _interpolate_zero_invalid_et_channels(raw_et: mne.io.BaseRaw) -> None:
+    for ch_name in ZERO_INVALID_ET_CHANNELS:
+        if ch_name not in raw_et.ch_names:
+            continue
+        signal = raw_et._data[raw_et.ch_names.index(ch_name)]
+        invalid_idx = np.flatnonzero(signal == 0)
+        if invalid_idx.size == 0:
+            continue
+        valid_idx = np.flatnonzero(signal != 0)
+        if valid_idx.size == 0:
+            continue
+        signal[invalid_idx] = np.interp(invalid_idx, valid_idx, signal[valid_idx])
 
 
-"""
-Do the annotations in *_Events.tsv match those in the *_Samples.tsv?
-If sync_event_message is not set, it checks all annotations. Else only those with that message.
-"""
-def _samples_events_matches(ann_on, ann_ds, inline_msgs, t0, sync_event_message=None):
-    # From annotations: keep only those whose description contains "Message"
-    ann_pairs = [
-        (int(round(on * 1e6 + t0)), ds.strip())
-        for on, ds in zip(ann_on, ann_ds)
-        if ("Message" if not sync_event_message else sync_event_message) in ds
-    ]
+def _round_step_like_et_channels(raw_et: mne.io.BaseRaw) -> None:
+    for ch_name in STEP_LIKE_ET_CHANNELS:
+        if ch_name not in raw_et.ch_names:
+            continue
+        ch_idx = raw_et.ch_names.index(ch_name)
+        raw_et._data[ch_idx] = np.rint(raw_et._data[ch_idx])
 
-    if sync_event_message:
-        #filter tuples to only those with sync_event_message
-        inline_msgs = [pair for pair in inline_msgs if sync_event_message in pair[1]]
+def gaussian(x, A, mu, sigma):
+    return A * np.exp(- (x - mu)**2 / (2 * sigma**2))
 
+def fit_gauss_to_xcorr(lags, y, half_window):
+    peak_idx = np.argmax(y) # upward peak only
+    mu0 = lags[peak_idx] # initial guess for the peak location
 
-    return inline_msgs == ann_pairs
+    # restrict fit to specified window around the peak
+    fit_mask  = np.abs(lags - mu0) <= half_window
+    base_mask = ~fit_mask
+    x_fit = lags[fit_mask]
+    y_fit = y[fit_mask]
 
+    # estimate baseline from edge range
+    b = np.median(y[base_mask]) #or .mean()
+    # sigma can be chosen smaller as well for tighter peaks
+    initial_guess = (y[peak_idx] - b, mu0, half_window / 3)
 
+    A, mu, sigma = curve_fit(
+        gaussian, x_fit, y_fit - b, p0=initial_guess, maxfev=1600
+    )[0]
+    return abs(A), mu, abs(sigma), b
 
 """
 Parses .txt files generated by SMI Vision's IDF Converter (*_Events.txt and *_Samples.txt)
 and generates an mne.Raw object with corresponding Annotations.
-The _Events file is currently only used for cross-checking the Annotations
 """
-def read_raw_iview(sample_fname: str, event_fname: str | None = None, cfg: SimpleNamespace | None = None):
-    with open(sample_fname, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
+def read_raw_iview(event_fname: str):
 
-    # One of the first lines will be "## Sample Rate: 60"
-    sfreq_idx = next(i for i, ln in enumerate(lines) if ln.startswith("##") and "Sample Rate" in ln)
-    sfreq = float(lines[sfreq_idx].split(':')[1].strip())
+    with open(event_fname, "r", encoding="utf-8", errors="ignore") as f:
+        ev_lines = f.readlines()
 
-    #First column header is always "Time"
-    header_idx = next(i for i, ln in enumerate(lines) if ln.startswith("Time"))
-    header = lines[header_idx].rstrip("\n").split("\t")
-    time_idx = header.index("Time")
-    type_idx = header.index("Type")
+    event_types = ["Saccade", "Fixation", "Blink", "User"]
 
-    num_idx = [i for i in range(len(header)) if i not in (type_idx,)] # type is the only non-numeric column
-    ch_names = [header[i] for i in num_idx if i not in (time_idx,)] # time is not a channel
-    data_cols = [[] for _ in num_idx]
-    inline_msgs = []
-    et_broken_values = 0
+    # TODO this is needed so the current pipeline doesn't crash
+    # Could later instead be populated with dfs from the events file
+    dummy_raw_extras = [{
+        "dfs": {
+            "fixations": pd.DataFrame(columns=['time', 'duration', 'end_time', 'eye', 'fix_avg_x', 'fix_avg_y', 'fix_avg_pupil_size', 'sacc_start_x', 'sacc_start_y', 'sacc_end_x', 'sacc_end_y', 'sacc_visual_angle', 'peak_velocity']),
+            "saccades": pd.DataFrame(),
+            "blinks": pd.DataFrame(),
+        }
+    }]
 
-    for ln in lines[header_idx + 1:]:
-        parts = ln.rstrip("\n").split("\t")
-        if(parts[3:11] == ["0.00"]*8):
-            et_broken_values += 1
+    # read table headers for the different events
+    headers = {}
+    for ev_type in event_types:
+        marker = f"Table Header for {ev_type}"
+        marker_idx = next(i for i, ln in enumerate(ev_lines) if ln.startswith(marker))
+        headers[ev_type] = ev_lines[marker_idx + 1].rstrip("\n").split("\t")
 
-        # inline MSG row, looks like "2655102177 MSG 1 # Message: 20"
-        if len(parts) == 4:
-            assert parts[type_idx] == "MSG"
-            inline_msgs.append((float(parts[time_idx]), parts[-1].strip()))
+    ann_on, ann_du, ann_ds, ann_ex = [], [], [], []
+
+    for ev_type in event_types:
+        cols = headers[ev_type]
+        rows = [ln for ln in ev_lines if ln.startswith(ev_type)]
+        if not rows:
             continue
-        for j, ci in enumerate(num_idx):
-            v = parts[ci]
-            data_cols[j].append(np.nan if v == "" else float(v))
 
-    # often, the header has more entries than the rows have values, these will be all nan
-    nan_cols = [np.all(np.isnan(col)) for col in data_cols]
-    data_cols = [col for col, is_nan in zip(data_cols, nan_cols) if not is_nan]
+        df = pd.read_csv(
+            StringIO("".join(rows)),
+            sep="\t",
+            names=cols,
+            header=None,
+            engine="python",
+            dtype="string",
+        )
 
-    # drop these channels for the ch_names object as well
-    ch_names = [nm for nm, is_nan in zip(ch_names, nan_cols[1:]) if not is_nan]
+        #print("TYPE : " + str(ev_type))
+        #print(df)
 
-    times = np.asarray(data_cols[0], float)
-    data = np.vstack([np.asarray(c, float) for c in data_cols[1:]])
+        start_us = pd.to_numeric(df["Start"]).to_numpy(dtype=float)
+        ann_on.extend((start_us / 1e6).tolist())
 
-    #if just using sfreq, some annotations may fall outside raw time range
-    sfreq_est = 1.0 / (np.median(np.diff(times)) / 1e6)  # Time is in µs
-    dur_s = (times[-1] - times[0]) / 1e6            # total recording span in seconds
-    sfreq_avg = (len(times) - 1) / dur_s            # average rate over the whole span
+        #First cols will always be "Event Type, Trial, Number, Start, Duration"
+        #Everything after duration is extra
+        extra_cols = cols[5:] if len(cols) > 5 else None
+        if extra_cols:
+            extras_df = df[extra_cols].apply(pd.to_numeric)
+            ann_ex.extend([d or None for d in extras_df.to_dict(orient="records")])
+        else:
+            ann_ex.extend([None] * len(df))
+
+        if(ev_type == "User"):
+            ann_ds.extend(df["Description"].to_list())
+            ann_du.extend([0.0] * len(df))
+        else:
+            dur_us = pd.to_numeric(df["Duration"]).to_numpy(dtype=float)
+            ann_ds.extend(df["Event Type"].to_list())
+            ann_du.extend((dur_us / 1e6).tolist())
+
+
+
+    # events file done, now parse samples file
+    sample_fname = event_fname.copy().update(suffix="Samples")
+
+    # some subjects only have an events file (vice versa does not exist)
+    # in this case, create minimal RawArray containing annotations from events file
+    if not os.path.isfile(sample_fname):
+        # can't use times[0] like later, so min(ann_on) is used (which is usually equivalent)
+        ann_on = [e - min(ann_on) for e in ann_on]
+        annotations = mne.Annotations(onset=ann_on, duration=ann_du, description=ann_ds, extras=ann_ex)
+
+        # can't estimate sfreq from len(samples)/duration, so use sfreq specified in header
+        sfreq = next((int(line.split("\t")[1]) for line in ev_lines if line.startswith("Sample Rate:\t")),60)
+        info_events = mne.create_info(ch_names=[],sfreq=sfreq)
+
+        dur_s = (max(ann_on) - min(ann_on))
+        n_times = max(2, int(np.ceil(dur_s * sfreq)) + 1)
+        raw_et = mne.io.RawArray(np.empty((0, n_times)), info_events)
+
+        raw_et.set_annotations(annotations)
+        raw_et._raw_extras = dummy_raw_extras
+        return raw_et, -1
+
+
+    with open(sample_fname, "r", encoding="utf-8", errors="ignore") as f:
+        sm_lines = f.readlines()
+
+    header_idx = next(i for i, ln in enumerate(sm_lines) if ln.startswith("Time"))
+    header = sm_lines[header_idx].rstrip("\n").split("\t")
+
+    df = pd.read_csv(
+        sample_fname,
+        sep="\t",
+        skiprows=header_idx + 1,
+        names=header,
+        header=None,
+        engine="python",
+        dtype="string",
+    )
+
+    df = df.loc[df["Type"] != "MSG"].copy() # already have MSG events from events file
+
+    numeric_cols = [c for c in df.columns if c != "Type"]
+    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric)
+
+    #bad samples will be 0.00 on all these cols
+    #comment these out to count number of nan samples
+    zero_cols = header[3:11]
+    et_nan_samples = int(df[zero_cols].eq(0).all(axis=1).sum())
+
+    #remove extra columns (usually Frame and Aux1)
+    df = df.dropna(axis=1, how="all")
+
+    times = df["Time"].to_numpy(dtype=float)
+    ch_names = [c for c in df.columns if c not in ("Time", "Type")]
+    data = df[ch_names].to_numpy(dtype=float).T  # (n_ch, n_times)
+
+    #if just using regular sfreq, some annotations may fall outside raw time range
+    dur_s = (times[-1] - times[0]) / 1e6
+    sfreq_avg = (len(times) - 1) / dur_s
+
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq_avg, ch_types=["misc"] * len(ch_names))
+    ann_on = [e - (times[0]/1e6) for e in ann_on] # normalize onset using lowest timestamp
+    annotations = mne.Annotations(onset=ann_on, duration=ann_du, description=ann_ds, extras=ann_ex)
+
+
+
     raw_et = mne.io.RawArray(data, info)
+    raw_et.set_annotations(annotations)
+    raw_et._raw_extras = dummy_raw_extras
 
-    #Data reading done. Now read Annotations from _Events.txt (if available)
+    #sorted_annotations = sorted(raw_et.annotations, key=lambda x: x["onset"])
+    #print(sorted_annotations)
 
-    ann_on, ann_du, ann_ds, ann_ex = [], [], [], [] #onset, duration, description, extras
-    et_eventfile_matches = False
-    et_unknown_events = 0
-    t0 = times[0]
-
-    #TODO Table headers are listed at the start of the file - use these instead of hardcoded len(parts) check
-
-    if event_fname and os.path.exists(event_fname):
-        with open(event_fname, "r", encoding="utf-8", errors="ignore") as ef:
-            for parts in csv.reader(ef, delimiter="\t"):
-                #empty lines
-                if(not parts):
-                    continue
-                kind = parts[0]
-                #Looks like "UserEvent 1 5 2547585001 # Message: 14"
-                if len(parts) == 5 and kind.startswith("UserEvent"):
-                    start = float(parts[3])
-                    # "The starting time of annotations in seconds after orig_time"
-                    # "Where orig_time is determined from beginning of raw data acquisition"
-                    ann_on.append((start - t0) / 1e6)
-                    ann_du.append(0.0) # Duration column is only used for saccades/fixations
-                    ann_ds.append(parts[4].strip()) # Message: 14
-                    ann_ex.append(None) # No extra data for UserEvents
-                #Looks like (no commas) "Fixation L, 1, 1, 2524661981, 2524811929, 149948, 1077.17, 697.01, 29, 17, -1, 12.61, 12.61
-                elif len(parts) >= 5 and (kind.startswith("Fixation") or kind.startswith("Saccade") or kind.startswith("Blink")):
-                    start, end = float(parts[3]), float(parts[4])
-                    ann_on.append((start - t0) / 1e6)
-                    # Alternatively, duration could be pulled from parts[5] directly
-                    ann_du.append((end - start) / 1e6)
-                    ann_ds.append(kind)
-
-                    #TODO use table header here as well
-                    extras_dict = {f"extra_{k}": float(val) for k, val in enumerate(parts[5:])}
-                    ann_ex.append(extras_dict or None)
-                                  
-                else:
-                    # Mostly table headers, file headers
-                    et_unknown_events += 1
-            
-            #check whether inline_msgs matches the events from this file
-            et_eventfile_matches = [_samples_events_matches(ann_on, ann_ds, inline_msgs, t0), _samples_events_matches(ann_on, ann_ds, inline_msgs, t0, cfg.sync_eventtype_regex_et)]
-    else:
-        logger.info(**gen_log_kwargs(message=f"SMI _Events.txt not found, using Events from _Samples.txt"))
-        # Fallback: inline MSG rows as zero-duration annotations
-        for t_us, desc in inline_msgs:
-            ann_on.append((t_us - t0) / 1e6)
-            ann_du.append(0.0)
-            ann_ds.append(desc)
-            ann_ex.append(None) # No extra data for inline messages
-    if ann_on:
-        raw_et.set_annotations(mne.Annotations(onset=ann_on, duration=ann_du, description=ann_ds, extras=ann_ex))
-        
-    #print("raw end (s):", (raw_et.n_times - 1) / raw_et.info["sfreq"])
-    #print("last ann (s):", max(ann_on))
-
-    #todo just return raw_et, metrics_object
-    return raw_et, et_eventfile_matches, et_unknown_events, sfreq_est, et_broken_values
-
-
+    return raw_et, et_nan_samples
 
 def _check_HEOG_ET_vars(cfg):
     # helper function for sorting out heog and et channels
@@ -267,6 +287,76 @@ def _check_HEOG_ET_vars(cfg):
         et_ch = [cfg.sync_et_ch]
     
     return heog_ch, et_ch, bipolar
+
+def _select_eog_candidate(
+    candidates: str | list[str] | tuple[str, ...],
+    *,
+    present_channels: set[str],
+    bad_channels: set[str],
+) -> tuple[str | None, bool]:
+    if isinstance(candidates, str):
+        candidates = [candidates]
+    else:
+        candidates = list(candidates)
+
+    bad_candidates = list()
+    bad_candidate_indices = list()
+    for idx, candidate in enumerate(candidates):
+        if candidate not in present_channels:
+            continue
+        if candidate in bad_channels:
+            bad_candidates.append(candidate)
+            bad_candidate_indices.append(idx)
+            continue
+        if candidate in present_channels and candidate not in bad_channels:
+            return candidate, idx > 0
+
+    if bad_candidates:
+        return bad_candidates[-1], bad_candidate_indices[-1] > 0
+
+    return None, False
+
+def _get_eog_electrode_metrics(
+    *,
+    cfg: SimpleNamespace,
+    raw: mne.io.BaseRaw,
+) -> tuple[dict[str, str | None], dict[str, bool]]:
+    eog_electrodes_used: dict[str, str | None] = {
+        "HEOG_anode": None,
+        "HEOG_cathode": None,
+        "VEOG_anode": None,
+        "VEOG_cathode": None,
+    }
+    eog_electrode_is_fallback: dict[str, bool] = {
+        key: False for key in eog_electrodes_used
+    }
+
+    if not cfg.eeg_bipolar_channels:
+        return eog_electrodes_used, eog_electrode_is_fallback
+
+    present_channels = set(raw.ch_names)
+    bad_channels = set(raw.info["bads"])
+
+    for eog_name in ("HEOG", "VEOG"):
+        if eog_name not in cfg.eeg_bipolar_channels:
+            continue
+        anode_cfg, cathode_cfg = cfg.eeg_bipolar_channels[eog_name]
+        anode_used, anode_is_fallback = _select_eog_candidate(
+            anode_cfg,
+            present_channels=present_channels,
+            bad_channels=bad_channels,
+        )
+        cathode_used, cathode_is_fallback = _select_eog_candidate(
+            cathode_cfg,
+            present_channels=present_channels,
+            bad_channels=bad_channels,
+        )
+        eog_electrodes_used[f"{eog_name}_anode"] = anode_used
+        eog_electrode_is_fallback[f"{eog_name}_anode"] = anode_is_fallback
+        eog_electrodes_used[f"{eog_name}_cathode"] = cathode_used
+        eog_electrode_is_fallback[f"{eog_name}_cathode"] = cathode_is_fallback
+
+    return eog_electrodes_used, eog_electrode_is_fallback
 
 def _mark_calibration_as_bad(raw, cfg):
     # marks recalibration beginnings and ends as one bad segment
@@ -298,6 +388,8 @@ def get_input_fnames_sync_eyelink(
     cfg: SimpleNamespace,
     subject: str,
     session: str | None,
+    run: str,
+    task: str | None,
 ) -> dict:
     
     # Get from config file whether `task` is specified in the et file name
@@ -309,6 +401,7 @@ def get_input_fnames_sync_eyelink(
     bids_basename = BIDSPath(
         subject=subject,
         session=session,
+        run=run,
         task=cfg.task,
         acquisition=cfg.acq,
         recording=cfg.rec,
@@ -319,108 +412,76 @@ def get_input_fnames_sync_eyelink(
         extension=".fif",
     )
 
-    et_asc_bids_basename = BIDSPath(
+    et_bids_basename = BIDSPath(
         subject=subject,
         session=session,
         task=et_task,
         acquisition=cfg.acq,
         recording=cfg.rec,
-        datatype="beh",
+        datatype="misc",
         root=cfg.bids_root,
         suffix="et",
         check=False,
         extension=".asc",
     )
 
-    et_edf_bids_basename = BIDSPath(
-        subject=subject,
-        session=session,
-        task=et_task,
-        acquisition=cfg.acq,
-        recording=cfg.rec,
-        datatype="beh",
-        root=cfg.bids_root,
-        suffix="et",
-        check=False,
-        extension=".edf",
-    )
-
-    et_txt_bids_basename = BIDSPath(
-        subject=subject,
-        session=session,
-        task=et_task,
-        acquisition=cfg.acq,
-        recording=cfg.rec,
-        datatype="beh",
-        root=cfg.bids_root,
-        suffix="et",
-        check=False,
-        extension=".txt",
-    )
-
-    et_txt_events_bids_basename = BIDSPath(
-        subject=subject,
-        session=session,
-        task=et_task,
-        acquisition=cfg.acq,
-        recording=cfg.rec,
-        datatype="beh",
-        root=cfg.bids_root,
-        suffix="et_Events",
-        check=False,
-        extension=".txt",
-    )
-
-
+ 
     in_files = dict()
-    for run in cfg.runs:
-        key = f"raw_run-{run}"
-        in_files[key] = bids_basename.copy().update(
-            run=run, processing=cfg.processing, suffix="raw"
-        )
-        _update_for_splits(in_files, key, single=True)
 
-        et_bids_basename_temp = et_asc_bids_basename.copy()
+    key = f"raw_run-{run}"
+    in_files[key] = bids_basename.copy().update(
+        processing=cfg.processing, suffix="raw"
+    )
 
-        if cfg.et_has_run:
-            et_bids_basename_temp.update(run=run)
+    
 
-        # _update_for_splits(in_files, key, single=True) # TODO: Find out if we need to add this or not
+    if cfg.et_has_run:
+        et_bids_basename.update(run=run)
 
-        if not os.path.isfile(et_bids_basename_temp):
-            logger.info(**gen_log_kwargs(message=f"Couldn't find {et_bids_basename_temp} file. If edf file exists, edf2asc will be called."))
+    # _update_for_splits(in_files, key, single=True) # TODO: Find out if we need to add this or not
 
-            et_bids_basename_temp = et_edf_bids_basename.copy()
+    # filename formats to check (suffix, extension)
+    variants = [
+        ("et", ".asc"),
+        ("physio", ".asc"),
+        ("et", ".edf"),
+        ("physio", ".edf"),
+        ("Events", ".txt") # SMI
+    ]
 
-            if cfg.et_has_run:
-                et_bids_basename_temp.update(run=run)
+    for suffix, ext in variants:
+        candidate = et_bids_basename.copy().update(suffix=suffix, extension=ext)
 
-            # _update_for_splits(in_files, key, single=True) # TODO: Find out if we need to add this or not
+        if os.path.isfile(candidate.fpath):
+            key = f"et_run-{run}"
+            in_files[key] = candidate
+            return in_files
 
-            if not os.path.isfile(et_bids_basename_temp):
+        if suffix == "et" and ext == ".asc":
+            logger.info(**gen_log_kwargs(
+                message=f"Couldn't find {candidate} file. Trying suffix='physio' before checking .edf."
+            ))
+        elif suffix == "physio" and ext == ".asc":
+            logger.info(**gen_log_kwargs(
+                message=f"Also couldn't find {candidate}; checking .edf for suffix='et'."
+            ))
+        elif suffix == "et" and ext == ".edf":
+            logger.info(**gen_log_kwargs(
+                message=f"Also didn't find {candidate} file, checking .edf with suffix _physio"
+            ))
+        elif suffix == "physio" and ext == ".edf":
+            logger.info(**gen_log_kwargs(
+                message=f"Also didn't find {candidate} file, last try, .txt with suffix _Events"
+            ))
 
-                # Try txt
-                et_bids_basename_temp = et_txt_bids_basename.copy()
-                if cfg.et_has_run:
-                    et_bids_basename_temp.update(run=run)
-
-                if not os.path.isfile(et_bids_basename_temp):
-
-                    # Try Eventsfile
-                    et_bids_basename_temp = et_txt_events_bids_basename.copy()
-                    if cfg.et_has_run:
-                        et_bids_basename_temp.update(run=run)
-
-                    if not os.path.isfile(et_bids_basename_temp):
-
-                        logger.error(**gen_log_kwargs(message=f"Also didn't find {et_bids_basename_temp} file, one of .asc, .edf or .txt needs to exist for ET sync."))
-                        raise FileNotFoundError(f"For run {run}, could neither find .asc, .edf nor .txt eye-tracking file. Please double-check the file names.")
-
-        key = f"et_run-{run}"
-        in_files[key] = et_bids_basename_temp
-  
-    return in_files
-
+    # previous candidates all failed
+    logger.error(**gen_log_kwargs(
+        message=f"Also didn't find {candidate} file, no valid files exist for ET sync."
+    ))
+    raise FileNotFoundError(
+        f"For run {run}, could neither find .asc nor .edf nor .txt eye-tracking file. "
+        f"Please double-check the file names."
+    )
 
 
 @failsafe_run(
@@ -432,25 +493,23 @@ def sync_eyelink(
     exec_params: SimpleNamespace,
     subject: str,
     session: str | None,
+    run: str,
+    task: str | None,
     in_files: dict,
 ) -> dict:
     
     """Run Sync for Eyelink."""
     import matplotlib.pyplot as plt
+    from scipy.signal import correlate
 
-
-    raw_fnames = [in_files.pop(f"raw_run-{run}") for run in cfg.runs]
-    et_fnames = [in_files.pop(f"et_run-{run}") for run in cfg.runs]
-    
-    logger.info(**gen_log_kwargs(message=f"Found the following eye-tracking files: {et_fnames}"))
+    raw_fname = in_files.pop(f"raw_run-{run}")
+    et_fname = in_files.pop(f"et_run-{run}")
+    logger.info(**gen_log_kwargs(message=f"Found the following eye-tracking files: {et_fname}"))
     out_files = dict()
-    bids_basename = raw_fnames[0].copy().update(processing=None, split=None) #, run=None)
-    out_files["eyelink"] = bids_basename.copy().update(processing="eyelink", suffix="raw")
+    bids_basename = raw_fname.copy().update(processing=None, split=None) #TODO: Do we need the `split=None` here?
+    out_files["eyelink_eeg"] = bids_basename.copy().update(processing="eyelink", suffix="raw")
     del bids_basename
 
-
-
-    
     participants_info = dict(
         release_number=np.nan,
         availability=np.nan
@@ -473,199 +532,301 @@ def sync_eyelink(
 
 
 
+    # Ideally, this would be done in one of the previous steps where all folders are created (in `_01_init_derivatives_dir.py`). 
+    logger.info(**gen_log_kwargs(message=f"Create `misc` folder for eye-tracking events."))
+    out_dir_misc = cfg.deriv_root / f"sub-{subject}"
+    if session is not None:
+        out_dir_misc /= f"ses-{session}"
+
+    out_dir_misc /= "misc"
+    out_dir_misc.mkdir(exist_ok=True, parents=True) # TODO: Check whether the parameter settings make sense or if there is a danger that something could be accidentally overwritten
+
+    out_files["eyelink_et_events"] = et_fname.copy().update(root=cfg.deriv_root, suffix="et_events", extension=".tsv")
+    
+    msg = f"Syncing Eyelink ({et_fname.basename}) and EEG data ({raw_fname.basename})."
+    logger.info(**gen_log_kwargs(message=msg))
+    raw = mne.io.read_raw_fif(raw_fname, preload=True)
+    eog_electrodes_used, eog_electrode_is_fallback = _get_eog_electrode_metrics(
+        cfg=cfg, raw=raw
+    )
+
+    et_format = et_fname.extension
+    nan_values = 0
+
+    if et_format == '.edf':
+        logger.info(**gen_log_kwargs(message=f"Converting {et_fname} file to `.asc` using edf2asc."))
+        import subprocess
+        subprocess.run(["edf2asc", et_fname]) # TODO: Still needs to be tested
+        et_fname.update(extension='.asc')
+        raw_et = mne.io.read_raw_eyelink(et_fname, find_overlaps=False) # TODO: Make find_overlaps optional
+    elif et_format == '.asc':
+        raw_et = mne.io.read_raw_eyelink(et_fname, find_overlaps=False) # TODO: Make find_overlaps optional
+    elif et_format == '.txt':
+        raw_et, nan_values = read_raw_iview(et_fname)
+
+    else:
+        raise AssertionError("ET file is neither an `.asc` nor an `.edf` nor a `.txt`. This should not have happened.")
+
 
     metrics = dict(
         subject=subject,
         release=participants_info["release_number"],
         task=cfg.task,
         availability=participants_info["availability"],
-
-        eeg_samples=np.nan,
-        et_samples=np.nan,
-        eeg_sampling_rate_hz=np.nan,
-        et_sampling_rate_hz=np.nan,
-        eeg_samples_trimmed=np.nan,
-        et_samples_trimmed=np.nan,
-        eeg_nan_values=np.nan,
-        et_nan_values=np.nan,
-        eeg_channel_cnt=np.nan,
-        et_channel_cnt=np.nan,
-
-        et_has_PORX=np.nan,
-        et_data_format=np.nan,
-        et_has_eventfile=False,
-        et_eventfile_matches=np.nan,
-        et_unknown_events=np.nan,
-
-        shared_events=np.nan,
-        mean_abs_sync_error_ms=np.nan,
-        median_abs_sync_error_ms=np.nan,
-        within_1_sample=np.nan,
-        within_4_samples=np.nan,
-        regression_slope=np.nan,
-        regression_intercept=np.nan,
-        xcorr_zero=np.nan,
-        xcorr_peak=np.nan,
-        xcorr_peak_idx=np.nan,
-        xcorr_second_peak=np.nan,
-        xcorr_second_peak_idx=np.nan,
-        snr=np.nan,
-
-        xcorr_cosine_similarity=np.nan,
-        xcorr_rmse=np.nan,
-        xcorr_dinf=np.nan,
-        xcorr_scale=np.nan,
-        xcorr_kl=np.nan,
-
-        n_saccades=np.nan,
-        avg_saccade_amplitude=np.nan,
-        avg_saccade_duration_ms=np.nan,
-        avg_fixation_duration_ms=np.nan,
-
-        n_blinks=np.nan,
-        avg_blink_duration_ms=np.nan
-
+        et_nan_values = nan_values,
+        eeg_sampling_rate_hz = raw.info["sfreq"],
+        et_sampling_rate_hz = raw_et.info["sfreq"],
+        eeg_channel_cnt = len(raw.ch_names),
+        eeg_bad_channel_count = len(raw.info["bads"]),
+        et_channel_cnt = len(raw_et.ch_names),
+        eog_electrode_used_HEOG_anode = eog_electrodes_used["HEOG_anode"],
+        eog_electrode_used_HEOG_cathode = eog_electrodes_used["HEOG_cathode"],
+        eog_electrode_used_VEOG_anode = eog_electrodes_used["VEOG_anode"],
+        eog_electrode_used_VEOG_cathode = eog_electrodes_used["VEOG_cathode"],
+        eog_electrode_is_fallback_HEOG_anode = eog_electrode_is_fallback["HEOG_anode"],
+        eog_electrode_is_fallback_HEOG_cathode = eog_electrode_is_fallback["HEOG_cathode"],
+        eog_electrode_is_fallback_VEOG_anode = eog_electrode_is_fallback["VEOG_anode"],
+        eog_electrode_is_fallback_VEOG_cathode = eog_electrode_is_fallback["VEOG_cathode"],
     )
 
+    # If the user did not specify a regular expression for the eye-tracking sync events, it is assumed that it's
+    # identical to the regex for the EEG sync events
+    if not cfg.sync_eventtype_regex_et:
+        cfg.sync_eventtype_regex_et = cfg.sync_eventtype_regex
 
+    #et_sync_times = [annotation["onset"] for annotation in raw_et.annotations if re.search(cfg.sync_eventtype_regex_et,annotation["description"])]
 
+    #sync_times    = [annotation["onset"] for annotation in raw.annotations    if re.search(cfg.sync_eventtype_regex,   annotation["description"])]
+
+    #"""
     
-    for idx, (run, raw_fname,et_fname) in enumerate(zip(cfg.runs, raw_fnames,et_fnames)):
-        msg = f"Syncing Eyelink ({et_fname.basename}) and EEG data ({raw_fname.basename})."
-        logger.info(**gen_log_kwargs(message=msg))
-        raw = mne.io.read_raw_fif(raw_fname, preload=True)
+    et_sync_pattern = re.compile(cfg.sync_eventtype_regex_et)
+    sync_pattern = re.compile(cfg.sync_eventtype_regex)
 
-        et_format = et_fname.extension
-        metrics["et_data_format"] = et_format
+    et_sync_annotations = [
+        annotation for annotation in raw_et.annotations
+        if et_sync_pattern.fullmatch(str(annotation["description"]))
+    ]
+    sync_annotations = [
+        annotation for annotation in raw.annotations
+        if sync_pattern.fullmatch(str(annotation["description"]))
+    ]
+    et_sync_times = [annotation["onset"] for annotation in et_sync_annotations]
+    sync_times = [annotation["onset"] for annotation in sync_annotations]
 
-        if et_format == '.edf':
-            logger.info(**gen_log_kwargs(message=f"Converting {et_fname} file to `.asc` using edf2asc."))
-            import subprocess
-            subprocess.run(["edf2asc", et_fname]) # TODO: Still needs to be tested
-            et_fname.update(extension='.asc')
-            raw_et = mne.io.read_raw_eyelink(et_fname, find_overlaps=True)
-        elif et_format == '.asc':
-            raw_et = mne.io.read_raw_eyelink(et_fname, find_overlaps=True)
-        elif et_format == '.txt':
-            # Attempt to find corresponding events file (if it exists)
-            event_fname = None
-            base_root = os.path.splitext(str(et_fname))[0]
-            # Subjects that have no regular samples file but only an Events file
-            # Will already have their _Events file read at this point
-            if(base_root.endswith('_Events')):
-                metrics["et_has_eventfile"] = True
-                metrics["et_has_samplefile"] = False
-                event_fname = base_root + '.txt'
-            else:
-                logger.info(**gen_log_kwargs(message=f"Looking for {str(base_root + '_Events.txt')} "))
-                if os.path.isfile(base_root + '_Events.txt'):
-                    event_fname = base_root + '_Events.txt'
-                    metrics["et_has_eventfile"] = True
-                    metrics["et_has_samplefile"] = True
+    if len(et_sync_times) != len(sync_times):
+        eeg_match_counts = Counter(
+            str(annotation["description"]) for annotation in sync_annotations
+        )
+        et_match_counts = Counter(
+            str(annotation["description"]) for annotation in et_sync_annotations
+        )
 
-            raw_et, et_eventfile_matches, et_unknown_events, sfreq_est, et_broken_values = read_raw_iview(str(et_fname), event_fname, cfg)
-            metrics["et_eventfile_matches"] = et_eventfile_matches[0]
-            metrics["et_eventfile_matches_filtered"] = et_eventfile_matches[1]
-            metrics["et_unknown_events"] = et_unknown_events
-            metrics["et_sfreq_est"] = sfreq_est
-            metrics["et_nan_values"] = et_broken_values
-            print("BROKEN " + str(et_broken_values))
-        else:
-            
-            raise AssertionError("ET file is neither an `.asc`, `.edf`, nor `.txt`.")
+        logger.info(**gen_log_kwargs(
+            message=(
+                f"Sync-event mismatch details. "
+                f"EEG regex={cfg.sync_eventtype_regex!r} matched {len(sync_times)} / {len(raw.annotations)} annotations; "
+                f"ET regex={cfg.sync_eventtype_regex_et!r} matched {len(et_sync_times)} / {len(raw_et.annotations)} annotations."
+            )
+        ))
+        logger.info(**gen_log_kwargs(
+            message=f"EEG matched annotation counts (top 10): {dict(eeg_match_counts.most_common(10))}"
+        ))
+        logger.info(**gen_log_kwargs(
+            message=f"ET matched annotation counts (top 10): {dict(et_match_counts.most_common(10))}"
+        ))
+
+        et_start_recording_onsets = [
+            float(annotation["onset"]) for annotation in raw_et.annotations
+            if "start_eye_recording" in str(annotation["description"])
+        ]
+        if et_start_recording_onsets:
+            last_start_recording = et_start_recording_onsets[-1]
+            et_matches_before_last_start = [
+                annotation for annotation in et_sync_annotations
+                if float(annotation["onset"]) < last_start_recording
+            ]
+            et_before_counts = Counter(
+                str(annotation["description"])
+                for annotation in et_matches_before_last_start
+            )
+            logger.info(**gen_log_kwargs(
+                message=(
+                    f"ET contains {len(et_start_recording_onsets)} 'start_eye_recording' markers. "
+                    f"Sync matches before the last marker ({last_start_recording:.3f}s): "
+                    f"{len(et_matches_before_last_start)}; at/after it: "
+                    f"{len(et_sync_annotations) - len(et_matches_before_last_start)}."
+                )
+            ))
+            if et_matches_before_last_start:
+                logger.info(**gen_log_kwargs(
+                    message=(
+                        f"Potential pre-task ET sync matches before last start marker: "
+                        f"{dict(et_before_counts)}"
+                    )
+                ))
+    #"""
+
+    assert len(et_sync_times) == len(sync_times),f"Detected eyetracking and EEG sync events were not of equal size ({len(et_sync_times)} vs {len(sync_times)}). Adjust your regular expressions via 'sync_eventtype_regex_et' and 'sync_eventtype_regex' accordingly"
+    if len(sync_times) == 2:
+        eeg_delta = float(sync_times[1] - sync_times[0])
+        et_delta = float(et_sync_times[1] - et_sync_times[0])
+
+        # Add one synthetic shared event pair so realign_raw does not fail the
+        # Pearson p-value check that is unreliable with only two points.
+        if eeg_delta == 0:
+            eeg_delta = 1.0 / float(raw.info["sfreq"])
+        if et_delta == 0:
+            et_delta = 1.0 / float(raw_et.info["sfreq"])
+
+        synthetic_sync_time = float(sync_times[-1] + eeg_delta)
+        synthetic_et_sync_time = float(et_sync_times[-1] + et_delta)
+        sync_times = [*sync_times, synthetic_sync_time]
+        et_sync_times = [*et_sync_times, synthetic_et_sync_time]
+        logger.info(**gen_log_kwargs(
+            message=(
+                "Only 2 shared sync events were found. Added one synthetic sync "
+                "event pair to bypass realign_raw correlation safety checks."
+            )
+        ))
+    assert len(sync_times) > 1,f"Not enough distinct sync events for realignment ({len(sync_times)})" #else realign_raw fails its regression
+
+    #logger.info(**gen_log_kwargs(message=f"{et_sync_times}"))
+    #logger.info(**gen_log_kwargs(message=f"{sync_times}"))
 
 
-        metrics["eeg_samples"] = raw.n_times
-        metrics["et_samples"] = raw_et.n_times
-        metrics["eeg_sampling_rate_hz"] = raw.info["sfreq"]
-        metrics["et_sampling_rate_hz"] = raw_et.info["sfreq"]
-        metrics["eeg_channel_cnt"] = len(raw.ch_names)
-        metrics["et_channel_cnt"] = len(raw_et.ch_names)
+    # Check whether the eye-tracking data contains nan values. If yes replace them with zeros.
+    if np.isnan(raw_et._data).any():
+
+        # Set all nan values in the eye-tracking data to 0 (to make resampling possible)
+        # TODO: Decide whether this is a good approach or whether interpolation (e.g. of blinks) is useful
+        # TODO: Decide about setting the values (e.g. for blinks) back to nan after synchronising the signals
+        # TODO: Tip: With `mne.preprocessing.annotate_nan` you could get the timings comparatively easy, and then after `realign_raw` put nans on top.
+        np.nan_to_num(raw_et._data, copy=False, nan=0.0)
+        logger.info(**gen_log_kwargs(message=f"The eye-tracking data contained nan values. They were replaced with zeros."))
+
+    _interpolate_zero_invalid_et_channels(raw_et)
+
+    #mne.preprocessing.eyetracking.interpolate_blinks(raw_et, buffer=(0.05, 0.05), interpolate_gaze=True)        
+
+    # realign_raw behaves unexpectedly if no meas_date is set
+    if raw.info["meas_date"] is None:
+        raw.set_meas_date(946684800) # use Jan 1st 2000 as dummy (default anonymized meas_date)
+    raw_et.set_meas_date(raw.info["meas_date"])
     
-        metrics["et_has_PORX"] = "L POR X [px]" in raw_et.ch_names and "R POR X [px]" in raw_et.ch_names
+
+    et_pre_n, et_pre_f   = raw_et.n_times, float(raw_et.info["sfreq"])
+    eeg_pre_n, eeg_pre_f = raw.n_times, float(raw.info["sfreq"])
+
+    # Sort annotations by onset
+    #sorted_annotations = sorted(raw_et.annotations, key=lambda x: x["onset"])
+    #for annot in sorted_annotations[:10]:
+    #    print(f"onset: {annot['onset']}, duration: {annot['duration']}, description: {annot['description']}")
+
+    # Align the data
+    mne.preprocessing.realign_raw(raw, raw_et, sync_times, et_sync_times)
+    _round_step_like_et_channels(raw_et)
 
 
-        # If the user did not specify a regular expression for the eye-tracking sync events, it is assumed that it's
-        # identical to the regex for the EEG sync events
-        if not cfg.sync_eventtype_regex_et:
-            cfg.sync_eventtype_regex_et = cfg.sync_eventtype_regex
-        
-        et_sync_times = [annotation["onset"] for annotation in raw_et.annotations if re.search(cfg.sync_eventtype_regex_et,annotation["description"])]
-        sync_times    = [annotation["onset"] for annotation in raw.annotations    if re.search(cfg.sync_eventtype_regex,   annotation["description"])]
-        
-        assert len(et_sync_times) == len(sync_times),f"Detected eyetracking and EEG sync events were not of equal size ({len(et_sync_times)} vs {len(sync_times)}). Adjust your regular expressions via 'sync_eventtype_regex_et' and 'sync_eventtype_regex' accordingly"
-        assert len(sync_times) > 1,f"Not enough distinct sync events for realignment ({len(sync_times)})" #else realign_raw fails its regression
-        #logger.info(**gen_log_kwargs(message=f"{et_sync_times}"))
-        #logger.info(**gen_log_kwargs(message=f"{sync_times}"))
-
-        #_num_nans_this = 0
-        # Check whether the eye-tracking data contains nan values. If yes replace them with zeros.
-        if np.isnan(raw_et.get_data()).any():
-
-            # Set all nan values in the eye-tracking data to 0 (to make resampling possible)
-            # TODO: Decide whether this is a good approach or whether interpolation (e.g. of blinks) is useful
-            # TODO: Decide about setting the values (e.g. for blinks) back to nan after synchronising the signals
-            #_num_nans_this = int(np.isnan(raw_et.get_data()).sum())
-            np.nan_to_num(raw_et._data, copy=False, nan=0.0)
-            logger.info(**gen_log_kwargs(message=f"The eye-tracking data contained nan values. They were replaced with zeros."))
-
-        #metrics["et_nan_values"] = _num_nans_this
-        metrics["eeg_nan_values"] = int(np.isnan(raw._data).sum())
-
-        et_pre_n, et_pre_f   = raw_et.n_times, float(raw_et.info["sfreq"])
-        eeg_pre_n, eeg_pre_f = raw.n_times,    float(raw.info["sfreq"])
-
-        # Align the data
-        mne.preprocessing.realign_raw(raw, raw_et, sync_times, et_sync_times)
-
-        metrics["et_samples_trimmed"]  = max(0, int(round(et_pre_n  - raw_et.n_times * (et_pre_f  / float(raw_et.info["sfreq"])))))
-        metrics["eeg_samples_trimmed"] = max(0, int(round(eeg_pre_n - raw.n_times    * (eeg_pre_f / float(raw.info["sfreq"])))))
+    # Sort annotations by onset
+    #sorted_annotations = sorted(raw_et.annotations, key=lambda x: x["onset"])
+    #for annot in sorted_annotations[:10]:
+    #    print(f"onset: {annot['onset']}, duration: {annot['duration']}, description: {annot['description']}")
 
 
-        raw_et.rename_channels(ascii_sanitize) #else crashes when e.g. degree symbol in channel name
+    metrics["et_samples_trimmed"]  = max(0, int(round(et_pre_n  - raw_et.n_times * (et_pre_f  / float(raw_et.info["sfreq"])))))
+    metrics["eeg_samples_trimmed"] = max(0, int(round(eeg_pre_n - raw.n_times    * (eeg_pre_f / float(raw.info["sfreq"])))))
+    raw_et.rename_channels(ascii_sanitize)
 
-        # Add ET data to EEG
-        raw.add_channels([raw_et], force_update_info=True)
-        raw._raw_extras.append(raw_et._raw_extras)
+    # Add ET data to EEG
+    raw.add_channels([raw_et], force_update_info=True)
 
-        # Also add ET annotations to EEG
-        # first mark et sync event descriptions so we can differentiate them later
-        # prevent np fixed-width strings truncation when prefixing with ET_
-        raw_et.annotations.description = raw_et.annotations.description.astype(object)
-        for idx, desc in enumerate(raw_et.annotations.description):
-            if re.search(cfg.sync_eventtype_regex_et, desc):
-                raw_et.annotations.description[idx] =  "ET_" + desc
+    # Also add ET annotations to EEG
+    # first mark et sync event descriptions so we can differentiate them later
+    # TODO: For now all ET events will be marked with ET and added to the EEG annotations, maybe later filter for certain events only
+    raw_et.annotations.description = np.array(list(map(lambda desc: "ET_" + desc, raw_et.annotations.description)))
+    
+    #avoid calling internal function _combine_annotations
+    #raw.set_annotations(mne.annotations._combine_annotations(raw.annotations,
+    #                                                            raw_et.annotations,
+    #                                                            0,
+    #                                                            raw.first_samp,
+    #                                                            raw_et.first_samp,
+    #                                                            raw.info["sfreq"]))
+    
+    shift = (raw.first_samp - raw_et.first_samp) / raw.info["sfreq"]
 
+    et_shifted = mne.Annotations(
+        onset=raw_et.annotations.onset + shift, # shift ET annotations to match EEG
+        orig_time=raw.annotations.orig_time, # match orig_time to raw EEG
+        duration=raw_et.annotations.duration,
+        description=raw_et.annotations.description,
+        ch_names=raw_et.annotations.ch_names,
+        # extras for mne>=1.11, for older versions this attribute is skipped
+        **({"extras": getattr(raw_et.annotations, "extras", None)} if hasattr(raw_et.annotations, "extras") else {})
+    )
+    raw.set_annotations(raw.annotations + et_shifted)
+    
+    msg = f"Saving synced data to disk."
+    logger.info(**gen_log_kwargs(message=msg))
+    raw.save(
+        out_files["eyelink_eeg"],
+        overwrite=True,
+        split_naming="bids", # TODO: Find out if we need to add this or not
+        split_size=cfg._raw_split_size, # ???
+    )
+    # no idea what the split stuff is...
+    _update_for_splits(out_files, "eyelink_eeg") # TODO: Find out if we need to add this or not
 
-        comb = _combine_annotations(
-            raw.annotations,
-            raw_et.annotations,
-            0,
-            raw.first_samp,
-            raw.first_samp,
-            raw.info["sfreq"],
-        )
-        
-        # When raw._first_time and raw_et._first_time are mismatched, the last events are cut off
-        # Identify which descriptions came from the ET stream
-        is_et = np.array([d in set(raw_et.annotations.description) for d in comb.description], dtype=bool)
-        # Shift EEG annotations back; leave ET as-is
-        comb.onset[~is_et] -= float(raw.first_samp) / float(raw.info["sfreq"])
+    # Extract and concatenate eye-tracking event data frames
+    et_dfs = raw_et._raw_extras[0]["dfs"]
+    df_list = [] # List to collect extracted data frames before concatenation
 
-        raw.set_annotations(mne.Annotations(onset=comb.onset, duration=comb.duration, description=comb.description, orig_time=None, extras=comb.extras))
+    # Extract fixations, saccades and blinks data frames
+    for df_name, trial_type in zip(["fixations", "saccades", "blinks"], ["fixation", "saccade", "blink"]):
+        df = et_dfs[df_name]
+        df["trial_type"] = trial_type
+        df_list.append(df)
 
+    et_combined_df = pd.concat(df_list, ignore_index=True)
+    et_combined_df.rename(columns={"time":"onset"}, inplace=True)
+    et_combined_df.sort_values(by="onset", inplace=True, ignore_index=True)
+    et_combined_df = et_combined_df[ # Adapt column order
+        [
+            "onset", # needs to be first (BIDS convention)
+            "duration",
+            "end_time",
+            "trial_type",
+            "eye",
+            "fix_avg_x",
+            "fix_avg_y",
+            "fix_avg_pupil_size",
+            "sacc_start_x",
+            "sacc_start_y",
+            "sacc_end_x",
+            "sacc_end_y",
+            "sacc_visual_angle",
+            "peak_velocity"
+        ]
+    ] 
 
-        msg = f"Saving synced data to disk."
-        logger.info(**gen_log_kwargs(message=msg))
-        raw.save(
-            out_files["eyelink"],
-            overwrite=True,
-            split_naming="bids", # TODO: Find out if we need to add this or not
-            split_size=cfg._raw_split_size, # ???
-        )
-        # no idea what the split stuff is...
-        _update_for_splits(out_files, "eyelink") # TODO: Find out if we need to add this or not
+    # Synchronize eye-tracking events with EEG data
 
+    # Recalculate regression coefficients (because the realign_raw function does not output them)
+    # Code snippet from `mne.preprocessing.realign_raw` function:
+    # https://github.com/mne-tools/mne-python/blob/b44c46ae7f9b6ffc5318b5d64f12906c1f2d875c/mne/preprocessing/realign.py#L69-L71
+    poly = Polynomial.fit(x=et_sync_times, y=sync_times, deg=1)
+    converted = poly.convert(domain=(-1, 1))
+    [zero_ord, first_ord] = converted.coef
+
+    # Synchronize time stamps of ET events
+    et_combined_df["onset"] = (et_combined_df["onset"] * first_ord + zero_ord)
+    et_combined_df["end_time"] = (et_combined_df["end_time"] * first_ord + zero_ord)
+    # TODO: To be super correct, we would need to recalculate duration column as well - but typically the slope is so close to "1" that this would typically result in <1ms differences
+
+    msg = f"Saving synced eye-tracking events to disk."
+    logger.info(**gen_log_kwargs(message=msg))
+    et_combined_df.to_csv(out_files["eyelink_et_events"], sep="\t", index=False)
 
     # Add to report
     fig, axes = plt.subplots(2, 2, figsize=(19.2, 19.2))
@@ -701,7 +862,6 @@ def sync_eyelink(
             et_array = et_array.mean(axis=0, keepdims=True)
         # cross correlate them
         corr = correlate(heog_array[0], et_array[0], mode="same") / heog_array.shape[1]
-
         # plot cross correlation
         # figure out how much we plot
         midpoint = len(corr) // 2
@@ -712,8 +872,67 @@ def sync_eyelink(
         else: # None
             y_range = np.arange(len(corr))
             x_range = y_range - midpoint
+        xcorr_plot = corr[y_range]
+
+        # gauss fit overlay
+        if cfg.sync_gauss_window is not None:
+            try:
+                A, mu, sigma, b = fit_gauss_to_xcorr(
+                    x_range, xcorr_plot, cfg.sync_gauss_window
+                )
+                gauss_plot = gaussian(x_range, A, mu, sigma) + b
+                axes[0, 0].plot(x_range, gauss_plot, linestyle="--", linewidth=2)
+                caption += (
+                    f"\nEstimated synchronisation delay (Gaussian peak) = {mu:.0f} "
+                    f"samples ({mu/raw.info['sfreq']:.3f} s)."
+                )
+                metrics["gauss_A"] = float(A)
+                metrics["gauss_mu"] = float(mu)
+                metrics["gauss_sigma"] = float(sigma)
+                metrics["gauss_b"] = float(b)
+                denom_full = np.linalg.norm(xcorr_plot) * np.linalg.norm(gauss_plot)
+                metrics["gauss_xcorr_cosine_similarity_full"] = (
+                    float(np.dot(xcorr_plot, gauss_plot) / denom_full)
+                    if denom_full > 0
+                    else np.nan
+                )
+                metrics["gauss_xcorr_cosine_similarity_full_n"] = int(xcorr_plot.size)
+                # Compare fit quality in the central 95% bell region (mu ± 1.96*sigma),
+                # limited to the plotting window defined by sync_plot_samps.
+                bell_mask = np.abs(x_range - mu) <= (1.96 * sigma)
+                if np.any(bell_mask):
+                    xcorr_bell = xcorr_plot[bell_mask]
+                    gauss_bell = gauss_plot[bell_mask]
+                    denom = np.linalg.norm(xcorr_bell) * np.linalg.norm(gauss_bell)
+                    metrics["gauss_xcorr_cosine_similarity_95"] = (
+                        float(np.dot(xcorr_bell, gauss_bell) / denom)
+                        if denom > 0
+                        else np.nan
+                    )
+                    metrics["gauss_xcorr_cosine_similarity_95_n"] = int(
+                        np.count_nonzero(bell_mask)
+                    )
+                else:
+                    metrics["gauss_xcorr_cosine_similarity_95"] = np.nan
+                    metrics["gauss_xcorr_cosine_similarity_95_n"] = 0
+            except Exception as err:
+                msg = (
+                    "Gaussian fit for HEOG/ET cross-correlation failed. "
+                    "Skipping Gaussian overlay and setting Gaussian metrics to -1. "
+                    f"Error: {err}"
+                )
+                logger.info(**gen_log_kwargs(message=msg))
+                metrics["gauss_A"] = -1.0
+                metrics["gauss_mu"] = -1.0
+                metrics["gauss_sigma"] = -1.0
+                metrics["gauss_b"] = -1.0
+                metrics["gauss_xcorr_cosine_similarity_full"] = -1.0
+                metrics["gauss_xcorr_cosine_similarity_full_n"] = -1
+                metrics["gauss_xcorr_cosine_similarity_95"] = -1.0
+                metrics["gauss_xcorr_cosine_similarity_95_n"] = -1
+
         # plot
-        axes[0,0].plot(x_range, corr[y_range], color="black")
+        axes[0,0].plot(x_range, xcorr_plot, color="black")
         axes[0,0].axvline(linestyle="--", alpha=0.3)
         axes[0,0].set_title("Cross correlation HEOG and ET")
         axes[0,0].set_xlabel("Samples")
@@ -722,10 +941,7 @@ def sync_eyelink(
         delay_idx = abs(corr).argmax() - midpoint
         delay_time = delay_idx * (raw.times[1] - raw.times[0])
         caption += f"\nThere was an estimated synchronisation delay of {delay_idx} samples ({delay_time:.3f} seconds.)"
-        
 
-
-        corr_norm, denom_norm = normalized_xcorr(heog_array[0], et_array[0], mode="same")
 
 
         
@@ -734,8 +950,7 @@ def sync_eyelink(
         idx = idx_all[order]
         # save xcorr as artifact, for later analysis if needed
         artifact = {
-            "xc_plot": corr[y_range].astype(np.float16),
-            "denom": denom_norm,
+            "xc_plot": xcorr_plot.astype(np.float16),
             "heog_shape": heog_array.shape[1],
             "xc_peak_indexes": idx.tolist(),
             "xc_peak_heights": corr[idx].tolist(),
@@ -750,167 +965,72 @@ def sync_eyelink(
 
 
 
-        ## Record some metrics
-        # all metrics are captured normalized + using raw scipy.signal.correlate
-        for xcorr, suffix in zip([corr, corr_norm], ["", "_norm"]):
-            xabs = np.abs(xcorr)
+        # Record metrics from the same xcorr array used for plotting above.
+        metrics["xcorr_zero"] = float(corr[midpoint])
+        # TODO maybe adjust heights, prominence
+        peaks, props = find_peaks(corr, height=0, prominence=0)
+        order = np.argsort(corr[peaks])[::-1]  # sort peaks by height, desc
+        metrics["snr"] = np.nan
 
-            # xcorr at zero lag
-            metrics[f"xcorr_zero{suffix}"] = float(xcorr[midpoint])
-            # TODO maybe adjust heights, prominence
-            peaks, props = find_peaks(corr, height=0, prominence=0)
+        if isinstance(plot_samps, tuple):
+            limit_left, limit_right = int(plot_samps[0]), int(plot_samps[1])
+        else:
+            half_window = int(cfg.sync_gauss_window) if cfg.sync_gauss_window else len(corr) // 4
+            limit_left, limit_right = -half_window, half_window
 
-            order = np.argsort(xcorr[peaks])[::-1] # sort peaks by height, desc
+        left_edge = int(np.clip(midpoint + limit_left, 0, len(corr)))
+        right_edge = int(np.clip(midpoint + limit_right, 0, len(corr)))
+        if left_edge > right_edge:
+            left_edge, right_edge = right_edge, left_edge
 
-            if peaks.size > 0:
-                j1 = peaks[order[0]]
-                metrics[f"xcorr_peak{suffix}"] = float(xcorr[j1])
-                metrics[f"xcorr_peak_idx{suffix}"] = int(j1 - midpoint) # lag in samples
-                metrics[f"xcorr_peak_prominence{suffix}"] = float(props["prominences"][order[0]])
-            if peaks.size > 1:
-                j2 = peaks[order[1]]
-                metrics[f"xcorr_second_peak{suffix}"] = float(xcorr[j2])
-                metrics[f"xcorr_second_peak_idx{suffix}"] = int(j2 - midpoint)  # lag in samples
-                metrics[f"xcorr_second_peak_prominence{suffix}"] = float(props["prominences"][order[1]])
+        noise_parts = []
+        if left_edge > 0:
+            noise_parts.append(corr[:left_edge])
+        if right_edge < len(corr):
+            noise_parts.append(corr[right_edge:])
+        noise_std = np.std(np.concatenate(noise_parts)) if noise_parts else 0.0
 
-            # analyze adherence to template curve
-            if(float(xcorr[midpoint]) > 0 and peaks.size > 0): #only analyze if positive correlation at zero lag, else analysis makes no sense
-
-                """
-                we are interested in the region around zero lag.
-                this region should contain a sharp spike right in the center.
-                often, the spike will fall off quickly on the sides/lobes, into the negative
-                sometimes it doesn't quite reach negatives, and instead forms a big valley
-                if there is neither within 1500 (empirical estimate) samples, the xcorr graph is no good
-                thus, the region is defined as follows (per side/lobe):
-                1. if the graph crosses y=0 within 1500 samples, take this as region marker
-                2. else, take the most prominent peak within 1500 samples
-                3. if there is no peak, just cut off at 1500
-
-                TODO: maybe only use this as fallback, and instead check first if the spike is already very clean
-                (e.g. singular spike within -300 to 300, prominent valleys close to this spike). only if it's not,
-                then use the previous method (could help with xcorr curves that are too high up and cross y=0 very late)
-                """
-
-                limit_left = -1500 # values relative to midpoint
-                limit_right = 1500
-
-                #find indexes where peak/spike crosses x-axis
-                sb = np.signbit(xcorr)
-                left_hits  = np.where(np.diff(sb[midpoint::-1]) == 1)[0]
-                right_hits = np.where(np.diff(sb[midpoint:])   == 1)[0]
-                crossing_left  = -left_hits[0]  if left_hits.size  else float("-inf") # first +→− to the left
-                crossing_right =  right_hits[0] if right_hits.size else float("inf")  # first +→− to the right
-
-
-                tolerance = 100 # some distance to lag = 0
-                valleys, props = find_peaks(-xcorr[midpoint + limit_left : midpoint-tolerance], prominence=0, width=0)
-                #valley_left = (valleys[props["prominences"].argmax()] if valleys.size else float("-inf")) + limit_left
-                vl_idx = np.argmax(props["prominences"] * props["widths"]) if valleys.size else None
-                valley_left = (valleys[vl_idx] if valleys.size else float("-inf")) + limit_left
-
-                valleys, props = find_peaks(-xcorr[midpoint+tolerance: midpoint + limit_right], prominence=0, width=0)
-                #valley_right = valleys[props["prominences"].argmax()]+tolerance if valleys.size else float("inf")
-                vr_idx = np.argmax(props["prominences"] * props["widths"]) if valleys.size else None
-                valley_right = valleys[vr_idx]+tolerance if valleys.size else float("inf")
-
-                if(crossing_left > limit_left):
-                    limit_left = crossing_left
-                elif(valley_left > limit_left):
-                    limit_left = valley_left
-                
-                if(crossing_right < limit_right):
-                    limit_right = crossing_right
-                elif(valley_right < limit_right):
-                    limit_right = valley_right
-                
-
-
-                tmpl_unit_plot = xcorr_template_curve(xcorr.size, midpoint+limit_left, midpoint, float(xcorr[j1]), midpoint+limit_right)
-
-                #TODO naively assuming cfg.sync_plot_samps is set
-                templ_unit_plot_window = tmpl_unit_plot[len(tmpl_unit_plot)//2 - cfg.sync_plot_samps : len(tmpl_unit_plot)//2 + cfg.sync_plot_samps]
-                templ_unit_plot_spike = tmpl_unit_plot[midpoint + limit_left : midpoint + limit_right]
-                xcorr_spike = xcorr[midpoint + limit_left : midpoint + limit_right]
-
-                if(suffix == ""): #since unnormalized xcorr is plotted, also plot unnormalized template
-                    axes[0,0].plot(x_range, templ_unit_plot_window, linestyle="--", linewidth=2, label="Template function")
-
-                # Error metrics (after best-fit scaling)
-                denom = np.linalg.norm(xcorr_spike) * np.linalg.norm(templ_unit_plot_spike)
-
-                cos_sim = float(np.dot(xcorr_spike, templ_unit_plot_spike) / denom) if denom > 0 else np.nan
-
-                ##### cosine similarity to template curve, if it was shifted to the peak of xcorr curve
-
-                L = templ_unit_plot_spike.size
-                shift = int(j1 - midpoint)
-                tmpl_shifted = np.zeros_like(templ_unit_plot_spike)
-                if -L < shift < L:
-                    if shift >= 0:
-                        tmpl_shifted[shift:] = templ_unit_plot_spike[: L - shift]
-                    else:  # shift < 0
-                        tmpl_shifted[: L + shift] = templ_unit_plot_spike[-shift:]
-
-                denom_shift = np.linalg.norm(xcorr_spike) * np.linalg.norm(tmpl_shifted)
-                cos_sim_peak = float(np.dot(xcorr_spike, tmpl_shifted) / denom_shift) if denom_shift > 0 else np.nan
-
-                #####
-
-                rmse = float(np.sqrt(np.mean((xcorr_spike - templ_unit_plot_spike) ** 2)))
-                dinf = float(np.max(np.abs(xcorr_spike - templ_unit_plot_spike)))
-                # Save metrics
-                metrics[f"xcorr_cosine_similarity{suffix}"] = cos_sim
-                metrics[f"xcorr_cosine_similarity_peakaligned{suffix}"] = cos_sim_peak
-                metrics[f"xcorr_rmse{suffix}"] = rmse
-                metrics[f"xcorr_dinf{suffix}"] = dinf
-                metrics[f"xcorr_template_steepness_left{suffix}"] = float(xcorr[j1]) / -limit_left
-                metrics[f"xcorr_template_steepness_right{suffix}"] = float(xcorr[j1]) / limit_right
-                #number of peaks in the spike region
-                metrics[f"xcorr_n_peaks_spike{suffix}"] = int(len(find_peaks(xcorr_spike)[0]))
-                
-
-                # SNR estimate: peak height / std of signal outside spike region
-                noise_std = np.std(np.concatenate((xcorr[: midpoint + limit_left], xcorr[midpoint + limit_right :])))
-
-                if noise_std > 0:
-                    metrics["snr"] = float(float(xcorr[j1]) / noise_std)
-
-
-                # analyze kurtosis
-                metrics[f"xcorr_kurtosis{suffix}"] = float(kurtosis(xcorr_spike, fisher=True)) 
-
-                # custom kurtosis weighted by squared positive energy (LLM code)
-                # centered lags around the local peak
-                xc = xcorr[midpoint + limit_left : midpoint + limit_right]
-                lags = np.arange(limit_left, limit_right)
-                peak_rel = int(np.argmax(xc))
-                t = lags - lags[peak_rel]                 # peak at 0
-
-                w = np.square(np.clip(xc, 0.0, None))     # positive-energy weights
-                ws = float(w.sum())
-                if ws > 0.0 and t.size >= 3:
-                    p = w / ws                            # pmf over lag
-                    m2 = float(np.sum(p * (t**2)))
-                    m4 = float(np.sum(p * (t**4)))
-                    ex_kurt = (m4 / (m2**2) - 3.0) if m2 > 0.0 else np.nan
-                else:
-                    ex_kurt = np.nan
-
-                metrics[f"xcorr_kurtosis_weighted{suffix}"] = float(ex_kurt)
+        if peaks.size > 0:
+            j1 = peaks[order[0]]
+            metrics["xcorr_peak"] = float(corr[j1])
+            metrics["xcorr_peak_idx"] = int(j1 - midpoint)  # lag in samples
+            metrics["xcorr_peak_prominence"] = float(props["prominences"][order[0]])
+            if noise_std > 0:
+                metrics["snr"] = float(corr[j1] / noise_std)
+        if peaks.size > 1:
+            j2 = peaks[order[1]]
+            metrics["xcorr_second_peak"] = float(corr[j2])
+            metrics["xcorr_second_peak_idx"] = int(j2 - midpoint)  # lag in samples
+            metrics["xcorr_second_peak_prominence"] = float(props["prominences"][order[1]])
 
 
 
-    
+
+
     # regression between synced events
     # we assume here that these annotations are sequential pairs of the same event in raw and et. otherwise this will break
-    raw_onsets = [annot["onset"] for annot in raw.annotations if re.match(cfg.sync_eventtype_regex, annot["description"])]
-    et_onsets = [annot["onset"] for annot in raw.annotations if re.match("ET_"+cfg.sync_eventtype_regex_et, annot["description"])]
- 
+    sync_pattern = re.compile(cfg.sync_eventtype_regex)
+    et_sync_pattern_prefixed = re.compile(f"ET_(?:{cfg.sync_eventtype_regex_et})")
+
+    raw_onsets = [
+        annot["onset"] for annot in raw.annotations
+        if not str(annot["description"]).startswith("ET_")
+        and sync_pattern.fullmatch(str(annot["description"]))
+    ]
+    et_onsets = [
+        annot["onset"] for annot in raw.annotations
+        if et_sync_pattern_prefixed.fullmatch(str(annot["description"]))
+    ]
+
     if len(raw_onsets) != len(et_onsets):
         raise ValueError(f"Lengths of raw {len(raw_onsets)} and ET {len(et_onsets)} onsets do not match.")
     
     metrics["shared_events"] = len(raw_onsets)
+    if len(raw_onsets) > 1:
+        sorted_raw_onsets = np.sort(np.asarray(raw_onsets, dtype=float))
+        metrics["longest_gap_between_events"] = float(np.max(np.diff(sorted_raw_onsets)))
+    else:
+        metrics["longest_gap_between_events"] = np.nan
 
     # regress and plot
     coef = np.polyfit(raw_onsets, et_onsets, 1)
@@ -928,12 +1048,7 @@ def sync_eyelink(
     axes[1,0].set_ylabel("Residual (seconds)")
     axes[1,0].set_xlabel("Samples")
     # histogram of distances between events in time
-    #axes[1,1].hist(np.array(raw_onsets) - np.array(et_onsets), bins=11, range=(-5,5), color="black")
-
-    # histogram of distances in samples (-5 to +5 samples offset)
-    diff_samples = (np.array(raw_onsets) - np.array(et_onsets)) * float(raw.info["sfreq"])
-    bin_edges = np.arange(-5.5, 5.6, 1.0)  # [-5.5, -4.5, ..., 4.5, 5.5]
-    axes[1, 1].hist(diff_samples, bins=bin_edges, color="black")
+    axes[1,1].hist(np.array(raw_onsets) - np.array(et_onsets), bins=11, range=(-5,5), color="black")
     axes[1,1].set_title("Raw - ET event onset distances histogram")
     axes[1,1].set_xlabel("milliseconds")
     # this doesn't seem to help, though it should...
@@ -944,6 +1059,7 @@ def sync_eyelink(
         exec_params=exec_params,
         subject=subject,
         session=session,
+        run=run,
         task=cfg.task,
     ) as report:
         caption = caption
@@ -958,7 +1074,7 @@ def sync_eyelink(
         plt.close(fig)
         del caption
 
-    
+
 
     metrics["mean_abs_sync_error_ms"] = (float(np.mean(np.abs(resids))) * 1000.0 if resids.size > 0 else np.nan)
     metrics["median_abs_sync_error_ms"] = (float(np.median(np.abs(resids))) * 1000.0 if resids.size > 0 else np.nan)
@@ -978,9 +1094,10 @@ def sync_eyelink(
     #print(raw_et.annotations["description"])
     # Saccade stats
     if getattr(raw_et, "annotations", None) is not None:
-        _is_saccade = np.array([str(desc).startswith("Saccade") for desc in raw_et.annotations.description], dtype=bool)
-        _is_fixation = np.array([str(desc).startswith("Fixation") for desc in raw_et.annotations.description], dtype=bool)
-        _is_blink = np.array([str(desc).startswith("Blink") for desc in raw_et.annotations.description], dtype=bool)
+
+        _is_saccade = np.array(["Saccade" in str(desc) for desc in raw_et.annotations.description], dtype=bool)
+        _is_fixation = np.array(["Fixation" in str(desc) for desc in raw_et.annotations.description], dtype=bool)
+        _is_blink = np.array(["Blink" in str(desc) for desc in raw_et.annotations.description], dtype=bool)
         metrics["n_saccades"] = int(_is_saccade.sum())
         metrics["n_blinks"] = int(_is_blink.sum())
 
@@ -993,7 +1110,7 @@ def sync_eyelink(
         anns = raw_et.annotations.to_data_frame()
         filtered = anns.loc[pd.Series(_is_saccade, index=anns.index)]
         try:
-            metrics["avg_saccade_amplitude"] = filtered["extra_5"].mean()
+            metrics["avg_saccade_amplitude"] = filtered["Amplitude"].mean()
         except Exception as e:
             print("Error computing avg_saccade_amplitude:", e)
 
@@ -1006,16 +1123,15 @@ def sync_eyelink(
 
     #n_blinks=np.nan,
     #avg_blink_duration_ms=np.nan
-
-
-    metrics_bids = raw_fnames[0].copy().update(
+    metrics_bids = raw_fname.copy().update(
         run=None, split=None,
         processing="eyelink",
         suffix="metrics",
         extension=".json",
     )
+    metrics_fname = out_dir_misc / metrics_bids.basename
 
-    metrics_bids.fpath.parent.mkdir(parents=True, exist_ok=True)
+    metrics_fname.parent.mkdir(parents=True, exist_ok=True)
 
     def _json_default(o):
         if isinstance(o, (np.floating, np.integer)):
@@ -1024,12 +1140,10 @@ def sync_eyelink(
             return o.tolist()
         return str(o)
 
-    with open(metrics_bids.fpath, "w", encoding="utf-8") as f:
+    with open(metrics_fname, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, default=_json_default)
 
 
-    #print("Causing crash now")
-    #print(raw_et.annotations["description"])
 
     return _prep_out_files(exec_params=exec_params, out_files=out_files)
 
@@ -1055,7 +1169,9 @@ def get_config(
         sync_heog_highpass = config.sync_heog_highpass,
         sync_heog_lowpass = config.sync_heog_lowpass,
         sync_plot_samps = config.sync_plot_samps,
+        sync_gauss_window = config.sync_gauss_window,
         sync_calibration_string = config.sync_calibration_string,
+        eeg_bipolar_channels = config.eeg_bipolar_channels,
         processing= "filt" if config.regress_artifact is None else "regress",
         _raw_split_size=config._raw_split_size,
 
@@ -1071,17 +1187,22 @@ def main(*, config: SimpleNamespace) -> None:
         logger.info(**gen_log_kwargs(message=msg, emoji="skip"))
         return
 
-
+    ssrt = _get_ssrt(config=config)
     with get_parallel_backend(config.exec_params):
-        parallel, run_func = parallel_func(sync_eyelink, exec_params=config.exec_params)
+        parallel, run_func = parallel_func(
+            sync_eyelink,
+            exec_params=config.exec_params,
+            n_iter=len(_get_ss(config=config)),
+        )
         logs = parallel(
             run_func(
                 cfg=get_config(config=config, subject=subject),
                 exec_params=config.exec_params,
                 subject=subject,
                 session=session,
+                run=run,
+                task=task,
             )
-            for subject in get_subjects(config)
-            for session in get_sessions(config)
+            for subject, session, run, task in ssrt
         )
     save_logs(config=config, logs=logs)
